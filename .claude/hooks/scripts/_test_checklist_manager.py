@@ -89,6 +89,18 @@ class TestSchemaValidation(unittest.TestCase):
         errors = cm.validate_thesis_sot(sot)
         self.assertTrue(any("TS10" in e for e in errors))
 
+    def test_ts11_invalid_execution_mode(self):
+        sot = self._make_valid_sot(execution_mode="turbo")
+        errors = cm.validate_thesis_sot(sot)
+        self.assertTrue(any("TS11" in e for e in errors))
+
+    def test_ts11_valid_execution_modes(self):
+        for mode in cm.VALID_EXECUTION_MODES:
+            sot = self._make_valid_sot(execution_mode=mode)
+            errors = cm.validate_thesis_sot(sot)
+            mode_errors = [e for e in errors if "TS11" in e]
+            self.assertEqual(len(mode_errors), 0, f"Mode '{mode}' should be valid")
+
     def test_valid_sot_no_errors(self):
         sot = self._make_valid_sot()
         errors = cm.validate_thesis_sot(sot)
@@ -185,6 +197,14 @@ class TestInitProject(unittest.TestCase):
     def test_respects_input_mode(self):
         sot = cm.init_project(self.project_dir, "Test", input_mode="D")
         self.assertEqual(sot["input_mode"], "D")
+
+    def test_respects_execution_mode(self):
+        sot = cm.init_project(self.project_dir, "Test", execution_mode="autopilot+ulw")
+        self.assertEqual(sot["execution_mode"], "autopilot+ulw")
+
+    def test_default_execution_mode_is_interactive(self):
+        sot = cm.init_project(self.project_dir, "Test")
+        self.assertEqual(sot["execution_mode"], "interactive")
 
     def test_returns_valid_sot(self):
         sot = cm.init_project(self.project_dir, "Test")

@@ -399,6 +399,22 @@ def _build_recovery_output(source, latest_path, summary, sot_warning, snapshot_a
                 for dh in diagnosis_hints[:3]:
                     output_lines.append(f"  - {dh}")
 
+            # P1-3: Proactive Team Summary surfacing
+            # Surface recent team coordination history for quality continuity
+            team_hints = _extract_recent_team_summaries(recent)
+            if team_hints:
+                output_lines.append("")
+                output_lines.append("■ 최근 팀 실행 이력 (자동 표면화):")
+                for th in team_hints[:3]:
+                    output_lines.append(f"  - {th}")
+
+            # P1-4: Quarterly archive pointer (long-term patterns)
+            qa_path = os.path.join(ka_snapshot_dir, "knowledge-archive-quarterly.jsonl")
+            if os.path.exists(qa_path):
+                output_lines.append(f"■ 분기별 아카이브: {qa_path}")
+                output_lines.append(f'  - Grep "error_patterns_aggregated" {qa_path} → 장기 에러 추세')
+                output_lines.append(f'  - Grep "team_summaries" {qa_path} → 장기 팀 실행 이력')
+
         if os.path.isdir(sessions_dir):
             output_lines.append(f"■ 세션 아카이브: {sessions_dir}")
 
@@ -592,6 +608,35 @@ def _extract_recent_diagnosis_patterns(recent_sessions):
             results.append(
                 f"{step_str} {gate} → {hyp} (evidence: {ev_count}건)"
             )
+        if len(results) >= 3:
+            break
+    return results[:3]
+
+
+def _extract_recent_team_summaries(recent_sessions):
+    """P1-3: Extract team coordination history from recent Knowledge Archive sessions.
+
+    Proactively surfaces past team execution patterns at SessionStart,
+    enabling continuity of team coordination across context resets.
+    Symmetric with _extract_recent_error_resolutions (P1-1).
+
+    P1 Compliance: Deterministic extraction from structured JSON data.
+    Returns: list of human-readable strings (max 3).
+    """
+    results = []
+    for session in reversed(recent_sessions):
+        team_summaries = session.get("team_summaries", [])
+        if not isinstance(team_summaries, list):
+            continue
+        for ts in team_summaries:
+            if isinstance(ts, dict):
+                team = ts.get("team", "?")
+                status = ts.get("status", "?")
+                agents = ts.get("agents", [])
+                agent_str = ", ".join(agents[:3]) if isinstance(agents, list) else str(agents)
+                results.append(f"{team} ({status}) — {agent_str}")
+            elif isinstance(ts, str):
+                results.append(ts[:80])
         if len(results) >= 3:
             break
     return results[:3]

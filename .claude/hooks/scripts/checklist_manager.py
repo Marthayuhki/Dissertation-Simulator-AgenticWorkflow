@@ -53,6 +53,9 @@ VALID_RESEARCH_TYPES = {"quantitative", "qualitative", "mixed", "undecided"}
 # Valid input modes
 VALID_INPUT_MODES = {"A", "B", "C", "D", "E", "F", "G"}
 
+# Valid execution modes (from start.md Step 3.5 mode selection)
+VALID_EXECUTION_MODES = {"interactive", "autopilot", "ulw", "autopilot+ulw"}
+
 # GroundedClaim types (from workflow.md GRA spec)
 VALID_CLAIM_TYPES = {
     "FACTUAL", "EMPIRICAL", "THEORETICAL",
@@ -175,7 +178,7 @@ TRANSLATION_STEP_OFFSET = 180  # steps 181-210 are translation steps
 def validate_thesis_sot(data: dict) -> list[str]:
     """Validate thesis session.json schema. Returns list of errors (empty = valid).
 
-    Validation rules (TS1-TS10):
+    Validation rules (TS1-TS11):
       TS1: Root must be a dict
       TS2: Required keys present
       TS3: status must be in VALID_STATUSES
@@ -186,6 +189,7 @@ def validate_thesis_sot(data: dict) -> list[str]:
       TS8: outputs must be a dict with string values
       TS9: gates must be a dict with valid gate entries
       TS10: created_at and updated_at must be ISO format strings
+      TS11: execution_mode must be in VALID_EXECUTION_MODES (if present)
     """
     errors = []
 
@@ -196,8 +200,8 @@ def validate_thesis_sot(data: dict) -> list[str]:
     # TS2
     required_keys = {
         "project_name", "status", "current_step", "total_steps",
-        "research_type", "input_mode", "outputs", "gates",
-        "created_at", "updated_at",
+        "research_type", "input_mode", "execution_mode", "outputs",
+        "gates", "created_at", "updated_at",
     }
     missing = required_keys - set(data.keys())
     if missing:
@@ -262,6 +266,35 @@ def validate_thesis_sot(data: dict) -> list[str]:
                 datetime.fromisoformat(ts_val)
             except ValueError:
                 errors.append(f"TS10: {ts_field} is not valid ISO format: '{ts_val}'")
+
+    # TS11
+    exec_mode = data.get("execution_mode")
+    if exec_mode is not None and exec_mode not in VALID_EXECUTION_MODES:
+        errors.append(f"TS11: Invalid execution_mode '{exec_mode}', must be one of {sorted(VALID_EXECUTION_MODES)}")
+
+    # TS12: active_team must be None or a dict with required sub-fields
+    active_team = data.get("active_team")
+    if active_team is not None:
+        if not isinstance(active_team, dict):
+            errors.append("TS12: active_team must be None or a dict")
+        else:
+            for key in ("name", "status", "tasks_pending", "tasks_completed"):
+                if key not in active_team:
+                    errors.append(f"TS12: active_team missing required key '{key}'")
+            if not isinstance(active_team.get("tasks_pending", []), list):
+                errors.append("TS12: active_team.tasks_pending must be a list")
+            if not isinstance(active_team.get("tasks_completed", []), list):
+                errors.append("TS12: active_team.tasks_completed must be a list")
+
+    # TS13: completed_teams must be a list of dicts (if present)
+    completed_teams = data.get("completed_teams")
+    if completed_teams is not None:
+        if not isinstance(completed_teams, list):
+            errors.append("TS13: completed_teams must be a list")
+        else:
+            for i, team in enumerate(completed_teams):
+                if not isinstance(team, dict):
+                    errors.append(f"TS13: completed_teams[{i}] must be a dict")
 
     return errors
 
@@ -332,6 +365,7 @@ def create_initial_sot(
     project_name: str,
     research_type: str = "undecided",
     input_mode: str = "A",
+    execution_mode: str = "interactive",
     total_steps: int = 210,
 ) -> dict:
     """Create initial thesis SOT structure."""
@@ -343,6 +377,7 @@ def create_initial_sot(
         "total_steps": total_steps,
         "research_type": research_type,
         "input_mode": input_mode,
+        "execution_mode": execution_mode,
         "research_question": "",
         "academic_field": "",
         "outputs": {},
@@ -365,6 +400,7 @@ def create_initial_sot(
             "hitl-8": {"status": "pending", "timestamp": None},
         },
         "active_team": None,
+        "completed_teams": [],
         "fallback_history": [],
         "context_snapshots": [],
         "created_at": now,
@@ -905,6 +941,94 @@ def restore_checkpoint(project_dir: Path, checkpoint_name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Team Management
+# ---------------------------------------------------------------------------
+
+def update_active_team(
+    project_dir: Path,
+    name: str | None = None,
+    status: str | None = None,
+    tasks_pending: list | None = None,
+    tasks_completed: list | None = None,
+    append_task: str | None = None,
+    complete_task: str | None = None,
+) -> dict:
+    """Update active_team fields in SOT.
+
+    Args:
+        name: Team name (sets active_team.name)
+        status: Team status ("active", "completed", "failed")
+        tasks_pending: Replace tasks_pending list
+        tasks_completed: Replace tasks_completed list
+        append_task: Append a single task_id to tasks_pending
+        complete_task: Move a task_id from tasks_pending to tasks_completed
+
+    Returns:
+        Updated active_team dict.
+    """
+    project_dir = Path(project_dir)
+    sot = read_thesis_sot(project_dir)
+
+    team = sot.get("active_team")
+    if team is None and name is not None:
+        # Initialize new active_team
+        team = {
+            "name": name,
+            "status": "active",
+            "tasks_pending": [],
+            "tasks_completed": [],
+        }
+    elif team is None:
+        raise ValueError("No active team and no name provided to create one")
+
+    if name is not None:
+        team["name"] = name
+    if status is not None:
+        team["status"] = status
+    if tasks_pending is not None:
+        team["tasks_pending"] = tasks_pending
+    if tasks_completed is not None:
+        team["tasks_completed"] = tasks_completed
+    if append_task is not None:
+        team.setdefault("tasks_pending", []).append(append_task)
+    if complete_task is not None:
+        pending = team.get("tasks_pending", [])
+        if complete_task in pending:
+            pending.remove(complete_task)
+        team.setdefault("tasks_completed", []).append(complete_task)
+
+    sot["active_team"] = team
+    sot["updated_at"] = datetime.now(timezone.utc).isoformat()
+    write_thesis_sot(project_dir, sot)
+    return team
+
+
+def complete_team(project_dir: Path) -> dict | None:
+    """Move active_team to completed_teams and set active_team to None.
+
+    Returns:
+        The completed team dict, or None if no active team.
+    """
+    project_dir = Path(project_dir)
+    sot = read_thesis_sot(project_dir)
+
+    team = sot.get("active_team")
+    if team is None:
+        return None
+
+    team["status"] = "completed"
+    team["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    completed = sot.get("completed_teams", [])
+    completed.append(team)
+    sot["completed_teams"] = completed
+    sot["active_team"] = None
+    sot["updated_at"] = datetime.now(timezone.utc).isoformat()
+    write_thesis_sot(project_dir, sot)
+    return team
+
+
+# ---------------------------------------------------------------------------
 # Status and Sync
 # ---------------------------------------------------------------------------
 
@@ -969,6 +1093,7 @@ def get_status(project_dir: Path) -> dict:
         "current_phase": phase,
         "research_type": sot.get("research_type", "undecided"),
         "input_mode": sot.get("input_mode", "A"),
+        "execution_mode": sot.get("execution_mode", "interactive"),
         "gates_passed": f"{gates_passed}/{gates_total}",
         "hitls_completed": f"{hitls_completed}/{hitls_total}",
         "outputs_en": en_outputs,
@@ -993,6 +1118,8 @@ def _cli_init(args):
         kwargs["research_type"] = args.research_type
     if args.input_mode:
         kwargs["input_mode"] = args.input_mode
+    if args.execution_mode:
+        kwargs["execution_mode"] = args.execution_mode
 
     sot = init_project(project_dir, project_name, **kwargs)
     print(f"Thesis project initialized: {project_dir}")
@@ -1035,6 +1162,7 @@ def _cli_status(args):
     print(f"Phase: {status['current_phase']}")
     print(f"Research type: {status['research_type']}")
     print(f"Input mode: {status['input_mode']}")
+    print(f"Execution mode: {status['execution_mode']}")
     print(f"Gates: {status['gates_passed']}")
     print(f"HITL checkpoints: {status['hitls_completed']}")
     print(f"Outputs (EN): {status['outputs_en']}")
@@ -1102,6 +1230,47 @@ def _cli_record_hitl(args):
     return 0
 
 
+def _cli_update_team(args):
+    """Handle --update-team command."""
+    project_dir = Path(args.project_dir)
+    kwargs = {}
+    if args.team_name:
+        kwargs["name"] = args.team_name
+    if args.team_status:
+        kwargs["status"] = args.team_status
+    if args.append_task:
+        kwargs["append_task"] = args.append_task
+    if args.complete_task:
+        kwargs["complete_task"] = args.complete_task
+
+    try:
+        team = update_active_team(project_dir, **kwargs)
+        print(f"Active team updated: {team.get('name', 'unknown')}")
+        print(f"  Status: {team.get('status')}")
+        print(f"  Pending: {len(team.get('tasks_pending', []))}")
+        print(f"  Completed: {len(team.get('tasks_completed', []))}")
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cli_complete_team(args):
+    """Handle --complete-team command."""
+    project_dir = Path(args.project_dir)
+
+    try:
+        team = complete_team(project_dir)
+        if team:
+            print(f"Team completed: {team.get('name', 'unknown')}")
+        else:
+            print("No active team to complete.")
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Thesis Workflow Checklist Manager")
     parser.add_argument("--project-dir", required=True, help="Path to thesis project directory")
@@ -1114,14 +1283,21 @@ def main():
     group.add_argument("--restore-checkpoint", action="store_true", help="Restore checkpoint")
     group.add_argument("--validate", action="store_true", help="Validate thesis SOT")
     group.add_argument("--record-hitl", help="Record HITL checkpoint completion (e.g., hitl-1)")
+    group.add_argument("--update-team", action="store_true", help="Update active team fields")
+    group.add_argument("--complete-team", action="store_true", help="Move active team to completed_teams")
 
     parser.add_argument("--project-name", help="Project name (default: directory name)")
     parser.add_argument("--research-type", choices=sorted(VALID_RESEARCH_TYPES))
     parser.add_argument("--input-mode", choices=sorted(VALID_INPUT_MODES))
+    parser.add_argument("--execution-mode", choices=sorted(VALID_EXECUTION_MODES))
     parser.add_argument("--step", type=int, help="Target step number (for --advance)")
     parser.add_argument("--checkpoint", help="Checkpoint name")
     parser.add_argument("--hitl-status", default="completed", help="HITL status (default: completed)")
     parser.add_argument("--force", action="store_true", help="Force operation (skip checks)")
+    parser.add_argument("--team-name", help="Team name (for --update-team)")
+    parser.add_argument("--team-status", help="Team status (for --update-team)")
+    parser.add_argument("--append-task", help="Task ID to append to pending (for --update-team)")
+    parser.add_argument("--complete-task", help="Task ID to mark completed (for --update-team)")
 
     args = parser.parse_args()
 
@@ -1141,6 +1317,10 @@ def main():
         return _cli_validate(args)
     elif args.record_hitl:
         return _cli_record_hitl(args)
+    elif args.update_team:
+        return _cli_update_team(args)
+    elif args.complete_team:
+        return _cli_complete_team(args)
 
 
 if __name__ == "__main__":

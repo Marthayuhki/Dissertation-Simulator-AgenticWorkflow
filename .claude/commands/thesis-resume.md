@@ -46,9 +46,14 @@ Display:
 - Recovered project name and state
 - Current position in workflow
 - Last completed step
+- **Execution mode** (from SOT `execution_mode` field)
 - Next action
 - Any pending gates or HITL checkpoints
 
-### Step 6: Continue Execution
+### Step 6: Re-activate Execution Mode
+
+Read `execution_mode` from SOT and re-activate the corresponding behavior per thesis-orchestrator's "Execution Mode Activation" table. This ensures Autopilot/ULW survive context resets.
+
+### Step 7: Continue Execution
 
 Proceed with the next step following thesis-orchestrator protocol.

@@ -70,6 +70,11 @@ def main():
     entry_json = json.dumps(log_entry, ensure_ascii=False) + "\n"
     append_with_lock(work_log_path, entry_json)
 
+    # Incremental risk score cache update
+    # If the tool resulted in an error, refresh risk scores periodically
+    # so predictive_debug_guard.py has up-to-date warnings during long sessions
+    _maybe_refresh_risk_cache(tool_response, snapshot_dir)
+
     # Estimate tokens and check threshold
     estimated_tokens, signals = estimate_tokens(transcript_path)
 
@@ -155,6 +160,55 @@ def _build_log_entry(tool_name, tool_input, tool_response, session_id, project_d
             pass  # Non-blocking
 
     return entry
+
+
+def _maybe_refresh_risk_cache(tool_response, snapshot_dir):
+    """Incrementally refresh risk-scores.json when errors accumulate.
+
+    Instead of regenerating at SessionStart only, checks if the current
+    tool response indicates an error. After every 10 errors in a session,
+    regenerates the risk cache so predictive_debug_guard.py has real-time data.
+
+    Non-blocking: errors in this function are silently ignored.
+    """
+    try:
+        # Only trigger on error responses
+        if not isinstance(tool_response, dict):
+            return
+        is_error = tool_response.get("is_error", False)
+        if not is_error:
+            return
+
+        # Count errors via a lightweight counter file
+        counter_path = os.path.join(snapshot_dir, ".error_counter")
+        count = 0
+        if os.path.exists(counter_path):
+            try:
+                count = int(open(counter_path).read().strip())
+            except (ValueError, OSError):
+                count = 0
+        count += 1
+
+        with open(counter_path, "w") as f:
+            f.write(str(count))
+
+        # Refresh every 10 errors
+        if count % 10 != 0:
+            return
+
+        # Lazy import to avoid circular dependency
+        from _context_lib import aggregate_risk_scores
+        ki_path = os.path.join(snapshot_dir, "knowledge-index.jsonl")
+        if not os.path.exists(ki_path):
+            return
+
+        risk_scores = aggregate_risk_scores(ki_path)
+        if risk_scores:
+            cache_path = os.path.join(snapshot_dir, "risk-scores.json")
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(risk_scores, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass  # Non-blocking — risk cache refresh is supplementary
 
 
 def _trigger_proactive_save(project_dir, snapshot_dir, input_data=None):

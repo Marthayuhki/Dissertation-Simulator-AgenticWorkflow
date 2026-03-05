@@ -37,14 +37,23 @@ Ask the user (in Korean) for:
 
 ### Step 2: Initialize Project
 
+The `--execution-mode` value comes from the user's mode selection in `/start` Step 3.5.
+
 ```bash
 python3 "$CLAUDE_PROJECT_DIR"/.claude/hooks/scripts/checklist_manager.py \
   --init \
   --project-dir "$CLAUDE_PROJECT_DIR/thesis-output/{sanitized-topic-name}" \
   --project-name "{topic}" \
   --research-type {type} \
-  --input-mode {mode}
+  --input-mode {mode} \
+  --execution-mode {execution_mode}
 ```
+
+Where `{execution_mode}` maps from the user's selection:
+- Mode 1 (Interactive) → `interactive`
+- Mode 2 (Autopilot) → `autopilot`
+- Mode 3 (ULW) → `ulw`
+- Mode 2+3 → `autopilot+ulw`
 
 ### Step 3: Set Orchestrator Environment
 
@@ -56,7 +65,12 @@ export THESIS_ORCHESTRATOR=1
 
 Display:
 - Created project directory and structure
-- Selected settings (research type, input mode, academic field)
+- Selected settings (research type, input mode, academic field, **execution mode**)
 - Total workflow steps (210)
-- Next step based on input mode
-- Available commands (/thesis:start, /thesis:status, /thesis:learn)
+- Next step preview
+
+### Step 5: Auto-Continue to Workflow
+
+After displaying the confirmation, **automatically** execute the `/thesis-start` protocol without requiring the user to manually invoke it. This ensures a seamless transition from initialization to workflow execution.
+
+Do NOT stop and wait for user input here — proceed directly to `/thesis-start`.

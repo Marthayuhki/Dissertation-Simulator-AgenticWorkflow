@@ -27,6 +27,7 @@ python3 "$CLAUDE_PROJECT_DIR"/.claude/hooks/scripts/checklist_manager.py \
 - 현재 단계: {current_phase}
 - 연구 유형: {research_type}
 - 입력 모드: Mode {input_mode}
+- 실행 모드: {execution_mode}
 - 게이트 통과: {gates_passed}
 - HITL 체크포인트: {hitls_completed}
 - 영어 산출물: {outputs_en}개

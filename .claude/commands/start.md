@@ -61,9 +61,13 @@ Before routing, always display:
 
 ### Step 3.5: User Mode Guide (Korean)
 
-After the banner and **before routing**, present the user mode guide. This helps the user choose how they want to interact with the workflow.
+After the banner, present the user mode guide. The behavior depends on the route:
 
-Display the following mode guide:
+**Route A (New project):** Always display the full mode guide and ask for selection.
+
+**Route B/C (Existing project):** Read the existing `execution_mode` from SOT first. Display the current mode and ask: "현재 모드: {mode}. 변경하시겠습니까? (Enter로 유지)" — only re-select if user requests a change.
+
+#### Mode Guide Display (for Route A, or Route B/C when user wants to change):
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -87,7 +91,7 @@ Display the following mode guide:
 **Mode Selection Rules:**
 1. Ask the user to choose a mode (1, 2, or 3) or combination (e.g., "2+3" for Autopilot + ULW)
 2. If the user does not choose, default to **Interactive** (mode 1)
-3. Record the selected mode in SOT (`execution_mode` field) after project initialization
+3. Pass the selected mode to `/thesis-init` (Route A) or update SOT directly (Route B/C)
 4. The mode can be changed mid-workflow by the user at any time
 
 **Activation Mapping:**

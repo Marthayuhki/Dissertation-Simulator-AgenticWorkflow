@@ -35,15 +35,33 @@ Based on current_step and input_mode in SOT:
 | Phase 3 steps | Thesis writing with Agent Team |
 | Phase 4 steps | Publication strategy |
 
-### Step 3: Execute
+### Step 3: Execute via Orchestrator
 
-Follow the thesis-orchestrator agent's execution protocol:
-1. Create appropriate Agent Team or call sub-agent
-2. Execute the step in English
-3. Validate output (L0 Anti-Skip)
+Invoke the thesis-orchestrator as a sub-agent. Pass the full execution context:
+
+```
+Agent: subagent_type="thesis-orchestrator", prompt="
+  Project directory: thesis-output/{project}
+  Current step: {current_step} (from SOT)
+  Current phase: {phase}
+  Execution mode: {execution_mode}
+  Research topic: {research_question}
+
+  Execute the next step(s) following your Execution Protocol.
+  For team-based steps, use Tier 1 (Agent Team) first.
+  Report back: completed steps, outputs created, any gate results.
+"
+```
+
+The orchestrator will:
+1. Determine execution tier (Team / Sub-agent / Direct) based on phase
+2. Create Agent Team for wave/phase steps, or call sub-agents for sequential steps
+3. Execute in English, validate output (L0 Anti-Skip + pACS)
 4. Call @translator for Korean pair
-5. Record in SOT
-6. Advance to next step
+5. Update SOT (outputs, current_step, active_team)
+6. Return execution summary
+
+**Do NOT perform orchestrator duties directly.** Always delegate to the thesis-orchestrator agent, which has the full tool set (TeamCreate, TaskCreate, SendMessage, TaskList, TaskUpdate) and execution protocol.
 
 ### Step 4: Report Progress (Korean)
 

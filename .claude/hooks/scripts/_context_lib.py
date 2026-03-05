@@ -3271,14 +3271,19 @@ def extract_session_facts(session_id, trigger, project_dir, entries, token_estim
     # 5. FIX-H1: Team work summaries — archive to KI for RLM persistence
     # completed_summaries in snapshot IMMORTAL can be lost during Phase 6-7 compression.
     # Archiving to KI ensures cross-session team coordination history survives.
+    # ETERNAL: These fields are preserved in quarterly archives even after rotation.
     team_summaries = _extract_team_summaries(project_dir)
     if team_summaries:
         facts["team_summaries"] = team_summaries
 
     # 6. Abductive Diagnosis patterns — archive to KI for cross-session learning
+    # ETERNAL: These fields are preserved in quarterly archives even after rotation.
     diagnosis_patterns = _extract_diagnosis_patterns(project_dir)
     if diagnosis_patterns:
         facts["diagnosis_patterns"] = diagnosis_patterns
+
+    # Mark ETERNAL fields for archival protection
+    facts["_eternal_fields"] = ["team_summaries", "diagnosis_patterns", "design_decisions"]
 
     return facts
 
@@ -3363,9 +3368,18 @@ def replace_or_append_session_facts(ki_path, facts):
 
 
 def cleanup_knowledge_index(snapshot_dir):
-    """Rotate knowledge-index.jsonl to keep MAX_KNOWLEDGE_INDEX_ENTRIES entries.
+    """Rotate knowledge-index.jsonl with tiered archival.
 
-    Deterministic: keeps the most recent N entries, removes oldest.
+    Instead of discarding old entries permanently, entries beyond
+    MAX_KNOWLEDGE_INDEX_ENTRIES are compressed into quarterly summaries
+    in knowledge-archive-quarterly.jsonl. This preserves long-term
+    cross-session learning patterns (team coordination, error resolution,
+    diagnosis patterns) that would otherwise be lost.
+
+    Tiered archival strategy:
+      - Active index: most recent 200 entries (full detail)
+      - Quarterly archive: older entries compressed by quarter
+        (aggregated error_patterns, design_decisions, team_summaries)
     """
     ki_path = os.path.join(snapshot_dir, "knowledge-index.jsonl")
     if not os.path.exists(ki_path):
@@ -3379,11 +3393,107 @@ def cleanup_knowledge_index(snapshot_dir):
         if len(lines) <= MAX_KNOWLEDGE_INDEX_ENTRIES:
             return
 
-        # Keep only the most recent entries
+        # Split: overflow (oldest) → archive, keep (newest) → active
+        overflow = lines[:-MAX_KNOWLEDGE_INDEX_ENTRIES]
         trimmed = lines[-MAX_KNOWLEDGE_INDEX_ENTRIES:]
+
+        # Archive overflow entries as quarterly summaries
+        _archive_to_quarterly(snapshot_dir, overflow)
+
+        # Write trimmed active index
         atomic_write(ki_path, "".join(trimmed))
     except Exception:
         pass
+
+
+def _archive_to_quarterly(snapshot_dir, overflow_lines):
+    """Compress overflow entries into quarterly summaries.
+
+    Groups entries by quarter (YYYY-Q#), aggregates key fields:
+    error_patterns, design_decisions, team_summaries, diagnosis_patterns.
+    Appends to knowledge-archive-quarterly.jsonl (never overwrites).
+    """
+    import collections
+
+    archive_path = os.path.join(snapshot_dir, "knowledge-archive-quarterly.jsonl")
+    quarters = collections.defaultdict(lambda: {
+        "session_count": 0,
+        "error_patterns": collections.Counter(),
+        "design_decisions": [],
+        "team_summaries": [],
+        "diagnosis_patterns": [],
+        "modified_files": collections.Counter(),
+        "tools_used": collections.Counter(),
+    })
+
+    for line in overflow_lines:
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        # Determine quarter from timestamp
+        ts = entry.get("timestamp", "")
+        if len(ts) >= 7:
+            year_month = ts[:7]  # "2026-03"
+            try:
+                month = int(year_month.split("-")[1])
+                quarter = (month - 1) // 3 + 1
+                qkey = f"{year_month[:4]}-Q{quarter}"
+            except (ValueError, IndexError):
+                qkey = "unknown"
+        else:
+            qkey = "unknown"
+
+        q = quarters[qkey]
+        q["session_count"] += 1
+
+        # Aggregate error patterns
+        for ep in entry.get("error_patterns", []):
+            if isinstance(ep, dict):
+                q["error_patterns"][ep.get("type", "unknown")] += ep.get("count", 1)
+            elif isinstance(ep, str):
+                q["error_patterns"][ep] += 1
+
+        # Collect design decisions (deduplicate by content)
+        for dd in entry.get("design_decisions", []):
+            if dd and dd not in q["design_decisions"]:
+                q["design_decisions"].append(dd)
+
+        # Collect team summaries
+        for ts_entry in entry.get("team_summaries", []):
+            if ts_entry:
+                q["team_summaries"].append(ts_entry)
+
+        # Collect diagnosis patterns
+        for dp in entry.get("diagnosis_patterns", []):
+            if dp and dp not in q["diagnosis_patterns"]:
+                q["diagnosis_patterns"].append(dp)
+
+        # Aggregate files and tools
+        for f in entry.get("modified_files", []):
+            q["modified_files"][f] += 1
+        for t in entry.get("tools_used", []):
+            q["tools_used"][t] += 1
+
+    # Write quarterly summaries (append mode)
+    try:
+        with open(archive_path, "a", encoding="utf-8") as f:
+            for qkey, q in sorted(quarters.items()):
+                summary = {
+                    "quarter": qkey,
+                    "session_count": q["session_count"],
+                    "error_patterns_aggregated": dict(q["error_patterns"]),
+                    "design_decisions": q["design_decisions"][:20],
+                    "team_summaries": q["team_summaries"][:10],
+                    "diagnosis_patterns": q["diagnosis_patterns"][:10],
+                    "top_modified_files": dict(q["modified_files"].most_common(20)),
+                    "top_tools": dict(q["tools_used"].most_common(10)),
+                    "archived_at": datetime.now(timezone.utc).isoformat(),
+                }
+                f.write(json.dumps(summary, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # Non-blocking — archival is supplementary
 
 
 def cleanup_session_archives(snapshot_dir):

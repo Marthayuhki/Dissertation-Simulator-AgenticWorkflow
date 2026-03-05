@@ -48,76 +48,144 @@ Display:
 export THESIS_ORCHESTRATOR=1
 ```
 
+## Execution Mode Activation
+
+When reading SOT at the start of execution, check the `execution_mode` field and activate the corresponding behavior:
+
+| `execution_mode` | Action |
+|------------------|--------|
+| `interactive` | Default. Every HITL requires manual approval. No special activation. |
+| `autopilot` | Set system SOT `autopilot.enabled: true` (per `autopilot-execution.md`). HITL auto-approved. |
+| `ulw` | Inject ULW intensifiers (I-1, I-2, I-3) into execution context (per `ulw-mode.md`). HITL manual. |
+| `autopilot+ulw` | Both: system SOT autopilot + ULW intensifiers. Full automation with maximum thoroughness. |
+
+This bridges the thesis SOT `execution_mode` to the existing activation mechanisms. The mode persists across context resets because it is stored in session.json.
+
 ## Execution Protocol
 
-### Phase Execution Pattern (repeat for each phase)
+### Step-by-Step Execution Loop
 
-1. **Read SOT**: `checklist_manager.py --status --project-dir {dir}`
-2. **Check dependencies**: `checklist_manager.py --validate --project-dir {dir}`
-3. **Create Agent Team** (if team-based step):
-   - Use TeamCreate with appropriate agents
-   - Assign tasks via TaskCreate + SendMessage
-   - Monitor via TaskList
-4. **Execute step** (if sub-agent or direct):
-   - Call appropriate agent via Agent tool
-   - Collect output
-5. **Record output**: `checklist_manager.py` record_output()
-6. **L0 validation**: Verify output file exists and meets MIN_OUTPUT_SIZE
-7. **Translation**: Call @translator for Korean pair
-8. **Record translation**: `checklist_manager.py` record_translation()
-9. **Advance step**: `checklist_manager.py --advance --step {N}`
-10. **Checkpoint** (at HITL points): `checklist_manager.py --save-checkpoint`
+For each step in the workflow, execute this loop:
 
-### Agent Team Lifecycle
+**E1. Read SOT and determine tier:**
+```bash
+python3 .claude/hooks/scripts/checklist_manager.py --status --project-dir {dir}
+python3 .claude/hooks/scripts/checklist_manager.py --validate --project-dir {dir}
+```
+Determine the current phase from `current_step`. Look up the Wave-to-Team Mapping table below. If the step belongs to a wave/phase with a team defined → use **Tier 1 (Agent Team)**. If sequential (Wave 4-5) → use **Tier 2 (Sub-agent)**. If Phase 0 → use **Tier 2 or Tier 3** depending on step complexity.
+
+**E2. Execute (Tier 1 — Agent Team):**
+
+Follow the Agent Team Lifecycle below. If TeamCreate fails or any teammate is unresponsive after assignment, **immediately** escalate to Tier 2 via the Fallback Protocol.
+
+**E3. Execute (Tier 2 — Sub-agent):**
+
+Call the appropriate agent definition via the Agent tool:
+```
+Agent: subagent_type="{agent-name}", prompt="Execute step {N}: {step_description}.
+  Research topic: {topic}. Output to: {output_path}.
+  Use GroundedClaim schema for all claims."
+```
+If the sub-agent fails 3 times, escalate to Tier 3 via the Fallback Protocol.
+
+**E4. Execute (Tier 3 — Direct):**
+
+Perform the task directly using Read, Write, Grep, Bash tools. Log the degradation:
+```bash
+python3 .claude/hooks/scripts/fallback_controller.py \
+  --project-dir {dir} --record-fallback \
+  --step {N} --from-tier {from_tier} --to-tier direct --reason "{reason}"
+```
+
+**E5. Post-execution (all tiers):**
+1. Verify output file exists and is non-empty (L0 Anti-Skip)
+2. Run pACS self-rating (per `autopilot-execution.md`)
+3. Call `@translator` for Korean pair (if Translation step)
+4. Record output in SOT: `checklist_manager.py` record_output
+5. Advance step: `checklist_manager.py --advance --step {N}`
+6. At HITL points: `checklist_manager.py --save-checkpoint`
+
+### Agent Team Lifecycle (Tier 1)
+
+Execute these steps **in this exact order**. Each step includes the SOT update it must trigger.
 
 ```
-1. TeamCreate → team is active
-2. TaskCreate → assign work to teammates
-3. SendMessage → coordinate and guide
-4. Monitor TaskList → wait for completion
-5. Collect results → merge outputs
-6. TeamDelete → clean up (CRITICAL: always clean up)
-7. If cleanup fails → log to fallback-logs/ and proceed
+STEP 1 — Create Team
+  TeamCreate(name="{team-name}", agents=[...])
+  → SOT UPDATE: checklist_manager.py --update-team --project-dir {dir} --team-name "{team-name}" --team-status active
+
+STEP 2 — Assign Tasks (one per agent)
+  For each agent in the team:
+    TaskCreate(title="{step description}", agent="{agent-name}",
+      description="Research topic: {topic}. Output file: {path}. Use GroundedClaim schema.")
+    → SOT UPDATE: checklist_manager.py --update-team --project-dir {dir} --append-task "{task_id}"
+
+STEP 3 — Coordinate
+  SendMessage(team="{team-name}",
+    message="Begin analysis. Each agent writes to its designated output file.
+    Use GroundedClaim schema. Report completion when done.")
+
+STEP 4 — Monitor (POLLING LOOP)
+  Repeat every check:
+    TaskList → inspect each task status
+    For each task with status="completed":
+      - Read the agent's output file
+      - Verify non-empty and valid
+      - TaskUpdate(task_id={id}, status="completed")
+      → SOT UPDATE: checklist_manager.py --update-team --project-dir {dir} --complete-task "{task_id}"
+    For each task still pending:
+      - If created > 3 minutes ago and no output → SendMessage reminder
+      - If created > 5 minutes ago and no output → ESCALATE (see Fallback)
+  Exit loop when: all tasks completed OR escalation triggered
+
+STEP 5 — Collect & Merge
+  Read all completed output files
+  Merge into wave summary (if wave step)
+
+STEP 6 — Cleanup
+  TeamDelete(team="{team-name}")
+  → SOT UPDATE: checklist_manager.py --complete-team --project-dir {dir}
+  If TeamDelete fails → log to fallback-logs/ and proceed
 ```
 
 **One team at a time**: Claude Code supports one active team per session. Always clean up the current team before creating the next.
 
-### Task Management Patterns
+### Concrete Team Instantiation Examples
 
-When executing wave agents via Agent Teams, use this concrete pattern:
-
-**Wave Execution (parallel agents):**
+**Wave 1 (steps 39-54):**
 ```
-# 1. Create the team
-TeamCreate: name="wave-1-team", agents=["literature-searcher", "seminal-works-analyst", "trend-analyst", "methodology-scanner"]
+TeamCreate(name="wave-1-team", agents=["literature-searcher", "seminal-works-analyst", "trend-analyst", "methodology-scanner"])
 
-# 2. Create tasks for each agent
-TaskCreate: title="Literature Search", agent="literature-searcher", description="Search academic databases for papers on {topic}. Output GroundedClaim YAML to wave-results/step-{N}.md"
-TaskCreate: title="Seminal Works Analysis", agent="seminal-works-analyst", description="Identify foundational works. Output to wave-results/step-{N+1}.md"
-TaskCreate: title="Trend Analysis", agent="trend-analyst", description="Analyze research trends. Output to wave-results/step-{N+2}.md"
-TaskCreate: title="Methodology Scan", agent="methodology-scanner", description="Survey methodological approaches. Output to wave-results/step-{N+3}.md"
+TaskCreate(title="Literature Search — {topic}", agent="literature-searcher",
+  description="Search academic databases for papers on '{topic}'. Write GroundedClaim YAML to thesis-output/{project}/wave-results/wave-1/step-39.md")
+TaskCreate(title="Seminal Works Analysis — {topic}", agent="seminal-works-analyst",
+  description="Identify foundational works for '{topic}'. Write to thesis-output/{project}/wave-results/wave-1/step-40.md")
+TaskCreate(title="Research Trend Analysis — {topic}", agent="trend-analyst",
+  description="Analyze research trends for '{topic}'. Write to thesis-output/{project}/wave-results/wave-1/step-41.md")
+TaskCreate(title="Methodology Survey — {topic}", agent="methodology-scanner",
+  description="Survey methodological approaches for '{topic}'. Write to thesis-output/{project}/wave-results/wave-1/step-42.md")
 
-# 3. Coordinate via SendMessage
-SendMessage: team="wave-1-team", message="Begin analysis. Each agent writes output to its designated step file. Use GroundedClaim schema for all claims."
-
-# 4. Monitor progress
-TaskList → check status of all tasks
-TaskUpdate: task_id={id}, status="completed" (when output verified)
-
-# 5. Clean up
-TeamDelete: team="wave-1-team"
+SendMessage(team="wave-1-team", message="Begin Wave 1 literature review analysis. Each agent writes output to its designated step file using GroundedClaim schema for all claims. Report when complete.")
 ```
 
-**Sub-agent Execution (fallback Tier 2):**
+**Phase 2 Quantitative (steps 105-124):**
 ```
-# No team — use Agent tool directly
-Agent: subagent_type="general-purpose", prompt="You are @literature-searcher. {full task description}"
+TeamCreate(name="design-quant-team", agents=["hypothesis-developer", "research-model-developer", "sampling-designer", "statistical-planner"])
+# ... TaskCreate for each agent with Phase 2 specific instructions
 ```
 
-**Direct Execution (fallback Tier 3):**
+**Sub-agent Execution (Tier 2 fallback):**
 ```
-# Orchestrator performs the task itself — no delegation
-Read, Write, Grep tools used directly
+Agent(subagent_type="literature-searcher",
+  prompt="You are the literature-searcher agent. Execute step 39 for the thesis on '{topic}'.
+  Search academic databases and write GroundedClaim YAML output to thesis-output/{project}/wave-results/wave-1/step-39.md.
+  Follow your agent definition instructions exactly.")
+```
+
+**Direct Execution (Tier 3 fallback):**
+```
+# Orchestrator performs the task directly using Read, Write, Grep, Bash
+# No delegation — log fallback event
 ```
 
 ### Wave-to-Team Mapping
@@ -153,23 +221,61 @@ At each HITL point:
 
 ## Fallback Protocol
 
-### 3-Tier Fallback
+### 3-Tier Fallback with Concrete Triggers
 
 ```
-Tier 1: Agent Team (quality optimized)
-  ↓ [Team creation fails / teammate unresponsive / coordination breakdown]
-Tier 2: Sub-agent (single agent execution)
-  ↓ [Sub-agent fails / repeated errors]
-Tier 3: Direct execution (orchestrator performs task directly)
-  + Log fallback event to fallback-logs/
-  + Notify user of degraded quality
+Tier 1: Agent Team (quality optimized — default for wave/phase steps)
+  ↓ TRIGGER: TeamCreate fails OR 2+ tasks timeout OR coordination breakdown
+Tier 2: Sub-agent (single agent, sequential execution)
+  ↓ TRIGGER: Sub-agent returns error 3 times for same step
+Tier 3: Direct execution (orchestrator performs task itself)
+  + ALWAYS: Log fallback event + Notify user of degraded quality
 ```
 
-### Fallback Decision Criteria
-- **Timeout**: Teammate idle > 5 minutes → reassign task
-- **Team failure**: 2+ teammates fail → switch to Tier 2
-- **Sub-agent failure**: 3 retries fail → switch to Tier 3
-- **Always log**: Record every fallback in SOT fallback_history
+### Fallback Decision Logic
+
+When monitoring tasks in the polling loop (Team Lifecycle STEP 4):
+
+```
+IF TeamCreate raises error:
+  → Log: fallback_controller.py --record-fallback --from-tier team --to-tier subagent
+  → Execute ALL team agents as sequential sub-agents (Tier 2)
+
+IF task created > 5 minutes ago AND no output file exists:
+  → SendMessage reminder to specific agent
+  → Wait 2 more minutes
+  → IF still no output:
+    → Log: fallback_controller.py --record-fallback --from-tier team --to-tier subagent
+    → Execute THAT specific agent as sub-agent (Tier 2)
+    → Continue monitoring remaining team tasks
+
+IF 2+ tasks in same team have timed out:
+  → TeamDelete (cleanup)
+  → Log: fallback_controller.py --record-fallback --from-tier team --to-tier subagent
+  → Execute ALL remaining agents as sequential sub-agents (Tier 2)
+
+IF sub-agent returns error:
+  → Retry with modified prompt (max 3 retries, each with different approach)
+  → IF 3 retries exhausted:
+    → Log: fallback_controller.py --record-fallback --from-tier subagent --to-tier direct
+    → Execute step directly (Tier 3)
+
+ALWAYS after fallback:
+  → Record in SOT fallback_history via checklist_manager.py
+  → Write fallback-logs/step-{N}-fallback.md with: tier_from, tier_to, reason, timestamp
+```
+
+### Fallback Logging Command
+
+```bash
+python3 .claude/hooks/scripts/fallback_controller.py \
+  --project-dir {dir} \
+  --record-fallback \
+  --step {N} \
+  --from-tier {team|subagent} \
+  --to-tier {subagent|direct} \
+  --reason "{specific reason}"
+```
 
 ## Translation Integration
 

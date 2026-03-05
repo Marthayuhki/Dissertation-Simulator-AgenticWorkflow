@@ -209,6 +209,42 @@ def record_success(project_dir: str, step: int, tier: str) -> None:
     save_fallback_log(project_dir, log)
 
 
+def record_fallback(
+    project_dir: str,
+    step: int,
+    from_tier: str,
+    to_tier: str,
+    reason: str = "manual",
+) -> dict:
+    """Record a fallback tier switch (arbitrary tier transition).
+
+    Unlike escalate_tier() which only allows sequential transitions,
+    this records any tier-to-tier switch (e.g., team → direct).
+    """
+    if from_tier not in TIER_ORDER:
+        return {"success": False, "error": f"Invalid from_tier: {from_tier}"}
+    if to_tier not in TIER_ORDER:
+        return {"success": False, "error": f"Invalid to_tier: {to_tier}"}
+
+    log = load_fallback_log(project_dir)
+    log.append({
+        "step": step,
+        "tier": to_tier,
+        "action": "fallback",
+        "from_tier": from_tier,
+        "reason": reason,
+        "timestamp": time.time(),
+    })
+    save_fallback_log(project_dir, log)
+
+    return {
+        "step": step,
+        "old_tier": from_tier,
+        "new_tier": to_tier,
+        "success": True,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fallback Controller")
     parser.add_argument("--project-dir", required=True)
@@ -224,11 +260,17 @@ def main():
                        help="Record a retry attempt")
     group.add_argument("--record-success", action="store_true",
                        help="Record successful completion")
+    group.add_argument("--record-fallback", action="store_true",
+                       help="Record a fallback tier switch")
     group.add_argument("--log", action="store_true",
                        help="Show fallback log")
 
     parser.add_argument("--reason", default="manual",
                         help="Reason for escalation/retry")
+    parser.add_argument("--from-tier", choices=TIER_ORDER,
+                        help="Source tier (for --record-fallback)")
+    parser.add_argument("--to-tier", choices=TIER_ORDER,
+                        help="Target tier (for --record-fallback)")
     args = parser.parse_args()
 
     if args.log:
@@ -244,7 +286,7 @@ def main():
         return 0
 
     if args.step is None:
-        parser.error("--step is required for --check, --escalate, --record-retry, --record-success")
+        parser.error("--step is required for --check, --escalate, --record-retry, --record-success, --record-fallback")
 
     if args.check:
         result = check_tier_status(args.project_dir, args.step, args.timeout)
@@ -273,6 +315,18 @@ def main():
         record_success(args.project_dir, args.step, tier)
         print(f"Step {args.step}: success recorded @ {tier}")
         return 0
+
+    if args.record_fallback:
+        if not args.from_tier or not args.to_tier:
+            parser.error("--record-fallback requires --from-tier and --to-tier")
+        result = record_fallback(
+            args.project_dir, args.step,
+            args.from_tier, args.to_tier, args.reason)
+        if result["success"]:
+            print(f"Step {args.step}: fallback recorded {result['old_tier']} -> {result['new_tier']}")
+        else:
+            print(f"Step {args.step}: {result.get('error', 'fallback recording failed')}")
+        return 0 if result["success"] else 1
 
     return 0
 
