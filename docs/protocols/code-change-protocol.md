@@ -1,7 +1,8 @@
-# Code Change Protocol (CCP) — 상세 명세
+# Code Change Protocol (CCP) — 상세 명세 (MANDATORY)
 
 > 이 문서는 절대 기준 3 (코드 변경 프로토콜)의 상세 절차이다.
 > CLAUDE.md에서 분리됨 — 코드 변경 시 참조.
+> **이 프로토콜을 건너뛴 코드 변경은 무효다.**
 
 ## 3단계 프로토콜
 
@@ -18,6 +19,8 @@
 - 구조적 관계 (상속, 합성, 참조)
 - 데이터 모델/스키마/타입 연쇄 변경
 - 테스트, 설정, 문서, API 스펙
+- 설정/환경/빌드: config, DI 설정, agent 정의(.md), Hook 등록(settings.json) 등
+- P1 자동 지원: `ccp_ripple_scanner.py` (PreToolUse Hook)가 Edit/Write 시 의존성을 자동 발견하여 stderr로 제공
 - 강결합·샷건 서저리 위험이 있으면 **반드시** 사전 고지 후 사용자와 협의
 
 ### Step 3 — 변경 설계 (Change Plan)

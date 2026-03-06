@@ -142,6 +142,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if test -f \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/scripts/ccp_ripple_scanner.py; then python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/scripts/ccp_ripple_scanner.py; fi",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SessionEnd": [

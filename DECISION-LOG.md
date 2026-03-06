@@ -900,6 +900,30 @@
 | 2026-03-05 | accepted | ADR-054: GroundedClaim Schema Unification — 47개 family-based prefix 체계 |
 | 2026-03-05 | accepted | ADR-055: --record-hitl CLI Extension — HITL 체크포인트 CLI 기록 |
 | 2026-03-05 | accepted | ADR-056: Thesis Remediation — P1 Python Boundary + Gate Regex Fix + GroundedClaim 정규화 |
+| 2026-03-06 | accepted | ADR-057: Audit Trail Persistence — 빈 폴더 6개 근본 원인 해결 |
+| 2026-03-06 | accepted | ADR-058: CCP MANDATORY 강제 + P1 의존성 스캐너 |
+
+### ADR-058: CCP MANDATORY 강제 + P1 의존성 스캐너
+
+- **날짜**: 2026-03-06
+- **상태**: Accepted
+- **맥락**: CCP(절대 기준 3)가 AGENTS.md에 완전 정의되어 있지만, CLAUDE.md에서 4줄 참조로만 존재하여 매 턴 활성화가 불안정했다. English-First(MANDATORY, 19줄 인라인)는 매번 작동하지만, CCP(4줄)는 불안정 — 인라인 분량과 활성화 신뢰도의 상관관계 확인.
+- **결정**:
+  1. **CLAUDE.md CCP 인라인 확장**: 4줄 → ~25줄. English-First 패턴 적용 — MANDATORY 키워드, "무효" 결과 명시, 비례성 테이블, CCP-1/2/3 인라인 체크리스트.
+  2. **`ccp_ripple_scanner.py` P1 신규**: PreToolUse Hook(Edit|Write)으로 CCP-2 데이터 수집을 자동화. grep 기반 참조 발견 + hardcoded Hub-Spoke 동기화 맵 + 테스트 파일 매핑 + Hook 등록 참조 + Python importer 발견. exit 0 전용(정보 제공, 차단 안 함).
+  3. **AGENTS.md "설정/환경/빌드" 예시 보강**: agent 정의(.md), Hook 등록(settings.json) 추가.
+  4. **code-change-protocol.md 동기화**: MANDATORY 경고 + P1 자동 지원 언급 + 설정 예시 보강.
+- **근거**:
+  - (1) 절대 기준 1(품질): DRY에 의한 토큰 절약 vs. 인라인에 의한 확실한 활성화 — 품질이 이김.
+  - (2) P1 원칙: 의존성 발견은 결정론적(grep, 파일 매핑). LLM이 "기억"에 의존하면 할루시네이션·누락 위험. Python이 사실(facts)을 제공하고 LLM은 판단(judgment)만.
+  - (3) Hub-Spoke 보존: AGENTS.md가 Hub SOT 유지. CLAUDE.md는 자기 완결적 활성화 트리거 + Hub 참조.
+- **대안**:
+  - PreToolUse Hook으로 CCP 준수 여부를 검증 → 기각 (CCP 준수는 의미론적이며 결정론적 검증 불가 — ADR-041 선례)
+  - CLAUDE.md에 트리거 테이블만 → 기각 (English-First 성공 패턴 분석 결과, 인라인 행동 지시가 필수)
+  - Hub(AGENTS.md)만 강화 → 기각 (AGENTS.md는 매 턴 로딩되지 않음. CLAUDE.md 인라인이 효과적)
+- **파급 효과**: Additive-only. 기존 코드 수정/삭제 없음. 신규 2파일 + 기존 5파일 수정(append/expand만). RLM/SOT/4계층 검증/DNA 유전 구조 영향 없음.
+- **관련 파일**: `CLAUDE.md` (§절대 기준 3, §Hook 테이블, §프로젝트 구조), `AGENTS.md` (L123), `docs/protocols/code-change-protocol.md`, `.claude/settings.json`, `.claude/hooks/scripts/ccp_ripple_scanner.py` (신규), `.claude/hooks/scripts/_test_ccp_ripple_scanner.py` (신규)
+- **관련 ADR**: ADR-007 (CCP 원본), ADR-041 (CAP — 의미론적 검증 불가 선례), ADR-036 (Predictive Debugging — 동일 P1 패턴)
 
 ---
 

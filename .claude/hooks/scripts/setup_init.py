@@ -50,6 +50,7 @@ REQUIRED_SCRIPTS = [
     "diagnose_context.py",
     "generate_context_summary.py",
     "predictive_debug_guard.py",
+    "ccp_ripple_scanner.py",
     "query_workflow.py",
     "restore_context.py",
     "save_context.py",

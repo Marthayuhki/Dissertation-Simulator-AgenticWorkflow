@@ -90,7 +90,7 @@ Good: Agent A → output-a.md 생성 → Orchestrator에 보고
       Orchestrator → state.json에 병합  → 단일 쓰기 지점
 ```
 
-### 절대 기준 3: 코드 변경 프로토콜 (Code Change Protocol)
+### 절대 기준 3: 코드 변경 프로토콜 (Code Change Protocol) — MANDATORY
 
 > **코드를 작성·수정·추가·삭제하기 전에, 반드시 아래 3단계를 내부적으로 수행한다.**
 > 이 프로토콜을 건너뛰는 것은 절대 기준 위반이다.
@@ -120,7 +120,7 @@ CCP가 "무엇을 수행하는가"(절차)를 정의한다면, CAP는 **"어떤 
 - **구조적 관계**: 상속/구현(inheritance, interface), 합성/구성(composition), 연관/참조(association)
 - **데이터 모델/스키마**: 같이 변경되어야 할 타입/필드/검증 로직
 - **테스트 코드**: 단위 테스트, 통합 테스트, 스냅샷 테스트 등
-- **설정/환경/빌드**: config, DI 설정, 라우팅, 의존성 주입 등
+- **설정/환경/빌드**: config, DI 설정, 라우팅, 의존성 주입, agent 정의(.md), Hook 등록(settings.json) 등
 - **문서/주석/API 스펙**: 주석, README, API 문서, 타입 정의 등
 
 "여기를 바꾸었으니, 이 변경이 어디까지 파급될 수 있는지"를 전문가 수준에서 조사한다. 결합도가 높은 부분(강결합, 변경 결합, 샷건 서저리 가능성)이 있다면 **반드시** 사전 고지하여 사용자와 협의한다.
@@ -291,6 +291,7 @@ AgenticWorkflow/
 │   │   ├── block_destructive_commands.py (PreToolUse Safety Hook — 위험 명령 차단(P1 할루시네이션 봉쇄), exit code 2로 차단 + Claude 자기 수정)
 │   │   ├── block_test_file_edit.py  (PreToolUse TDD Guard — 테스트 파일 수정 차단(.tdd-guard 토글), exit code 2로 차단 + 구현 코드 수정 유도)
 │   │   ├── predictive_debug_guard.py (PreToolUse Predictive Debug — 에러 이력 기반 위험 파일 경고, exit code 0 경고 전용)
+│   │   ├── ccp_ripple_scanner.py    (PreToolUse CCP-2 P1 — 의존성 자동 발견, Hub-Spoke 동기화 맵, exit code 0 정보 전용)
 │   │   ├── output_secret_filter.py  (PostToolUse 시크릿 탐지 — 3-tier 추출(tool_response→file read→transcript), 25+ regex 패턴, 2-패스 스캔(raw+base64/URL), fcntl-locked 감사 로그, exit code 0 경고 전용)
 │   │   ├── security_sensitive_file_guard.py (PostToolUse 보안 민감 파일 경고 — .env/PEM/credentials/cloud/K8s/terraform 등 12 패턴, 세션 dedup, exit code 0 경고 전용)
 │   │   ├── diagnose_context.py  (Abductive Diagnosis 사전 증거 수집 — 품질 게이트 FAIL 시 증거 번들 생성, Orchestrator 수동 호출)
@@ -306,7 +307,8 @@ AgenticWorkflow/
 │   │   ├── validate_retry_budget.py (Retry Budget P1 검증 — RB1-RB3 재시도 예산 판정(ULW-aware), JSON 출력)
 │   │   ├── _test_secret_filter.py   (output_secret_filter 테스트 — 44개)
 │   │   ├── _test_sensitive_file_guard.py (security_sensitive_file_guard 테스트 — 44개)
-│   │   └── _test_block_destructive.py (block_destructive_commands 테스트 — 43개)
+│   │   ├── _test_block_destructive.py (block_destructive_commands 테스트 — 43개)
+│   │   └── _test_ccp_ripple_scanner.py (ccp_ripple_scanner 테스트 — 28개)
 │   ├── context-snapshots/     ← 런타임 스냅샷 (gitignored)
 │   └── skills/
 │       ├── workflow-generator/   ← 워크플로우 설계·생성
