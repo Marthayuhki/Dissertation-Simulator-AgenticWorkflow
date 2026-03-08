@@ -1,3 +1,7 @@
+---
+description: "Predictive Failure Analysis — scan codebase and predict production failures using P1-sandwich architecture"
+---
+
 # /predict-failures — Predictive Failure Analysis
 
 Performs a full codebase scan and predicts production failure areas using cross-domain

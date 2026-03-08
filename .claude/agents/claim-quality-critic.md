@@ -68,6 +68,6 @@ You MUST output a single ```json code block with this exact structure:
 3. `claim_id` MUST exactly match IDs from the claim-map.
 4. `agreement` MUST be one of: "full", "partial", "disagree".
 5. `critique` is REQUIRED — explain your reasoning even for "full" agreement.
-6. `additions` is for NEW issues not in the evaluator's output (can be empty).
+6. `additions` is for NEW issues not in the evaluator's output (can be empty). When you detect contradictions between claims (e.g., two claims making incompatible assertions about the same construct), include each contradiction as an entry in the `additions` array with fields: `claim_id` (the claim where the contradiction is visible), `issue` (description of the contradiction and which other claim it conflicts with), `severity` ("high", "medium", or "low").
 7. Do NOT fabricate claim IDs. Only judge claims that exist in the input.
 8. Be genuinely adversarial: if the evaluator was too generous, say so. If a claim has no citation but scored 80+, flag it.

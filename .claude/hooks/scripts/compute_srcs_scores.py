@@ -119,6 +119,7 @@ def compute_file_scores(file_path: str) -> dict:
         "VS": vs,
         "GS": None,  # Requires LLM evaluation
         "US": None,  # Requires LLM evaluation
+        "mode": "P1_ONLY",  # GS/US null → P1 only; "WITH_EVALUATOR" when LLM fills GS/US
         "note": "GS and US require LLM evaluation via unified-srcs-evaluator",
     }
 

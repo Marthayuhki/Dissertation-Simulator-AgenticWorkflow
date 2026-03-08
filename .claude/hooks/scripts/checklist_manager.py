@@ -949,6 +949,12 @@ def advance_step(project_dir: Path, target_step: int, force: bool = False) -> di
     # Exit 0 always (P1 compliant) — warn only if hallucinations_detected >= 1.
     _warn_if_hallucinations(project_dir, current)
 
+    # H-5: pCCS compliance guard — verify pCCS decision was honored
+    _warn_if_pccs_noncompliant(sot, current)
+
+    # H-6: Review verdict guard — verify L2 review passed (if applicable)
+    _warn_if_review_failed(project_dir, current)
+
     sot["current_step"] = target_step
     sot["execution_substep"] = None  # Clear sub-step on step advance
     write_thesis_sot(project_dir, sot)
@@ -1008,6 +1014,99 @@ def _warn_if_hallucinations(project_dir: Path, step: int) -> None:
                 )
     except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
         pass  # Non-blocking — advance proceeds regardless
+
+
+def _warn_if_pccs_noncompliant(sot: dict, step: int) -> None:
+    """Check if pCCS decision was honored before advancing (H-5 guard).
+
+    If the most recent pCCS result for this step was 'rewrite_claims' or
+    'rewrite_step', verify that a subsequent pCCS re-evaluation occurred
+    and returned 'proceed'. Otherwise, warn the Orchestrator.
+
+    Non-blocking: always returns None. Prints WARNING to stderr if violation.
+    P1 Compliance: reads SOT dict only — no subprocess, no LLM.
+    """
+    if step <= 0:
+        return
+
+    pccs = sot.get("pccs")
+    if not pccs or not isinstance(pccs, dict):
+        return
+
+    history = pccs.get("history")
+    if not history or not isinstance(history, dict):
+        return
+
+    step_key = f"step-{step}"
+    entry = history.get(step_key)
+    if not entry or not isinstance(entry, dict):
+        return  # No pCCS record for this step — skip (Tier B step or not yet run)
+
+    action = entry.get("action", "proceed")
+    if action == "proceed" or action == "unknown":
+        return  # pCCS said proceed — all good
+
+    # pCCS said rewrite_claims or rewrite_step — check if re-evaluation happened
+    # The history dict uses step_key as key, so if the step was re-evaluated,
+    # the entry would be overwritten with the new result. If action is still
+    # not 'proceed', the rewrite was not re-evaluated or still fails.
+    print(
+        f"[pCCS WARNING] Step {step}: pCCS decision was '{action}' but no "
+        f"subsequent 'proceed' re-evaluation found. The Orchestrator may have "
+        f"skipped the required rewrite. Review pCCS history before accepting.",
+        file=sys.stderr,
+    )
+
+
+def _warn_if_review_failed(project_dir: Path, step: int) -> None:
+    """Check if L2 review verdict was PASS before advancing (H-6 guard).
+
+    Reads the review log for the current step and extracts the verdict.
+    If verdict is FAIL, warns the Orchestrator.
+
+    Non-blocking: always returns None. Prints WARNING to stderr if violation.
+    P1 Compliance: file read + regex — deterministic, no LLM.
+    """
+    import re
+
+    if step <= 0:
+        return
+
+    review_log = project_dir / "review-logs" / f"step-{step}-review.md"
+    if not review_log.exists():
+        return  # No review log — skip (non-L2 step or review not yet done)
+
+    try:
+        content = review_log.read_text(encoding="utf-8")
+    except IOError:
+        return
+
+    # Extract verdict — case-insensitive search for "Verdict: PASS" or "Verdict: FAIL"
+    # Anchored to common patterns from validate_review.py R4 format
+    verdict_match = re.search(
+        r'\*\*Verdict:\s*(PASS|FAIL|CONDITIONAL_PASS)\*\*',
+        content,
+        re.IGNORECASE,
+    )
+    if not verdict_match:
+        # Try unbolded variant
+        verdict_match = re.search(
+            r'Verdict:\s*(PASS|FAIL|CONDITIONAL_PASS)',
+            content,
+            re.IGNORECASE,
+        )
+
+    if not verdict_match:
+        return  # Cannot parse verdict — skip (don't block on unparseable format)
+
+    verdict = verdict_match.group(1).upper()
+    if verdict == "FAIL":
+        print(
+            f"[Review WARNING] Step {step}: L2 review verdict is FAIL. "
+            f"The step should not advance until review issues are resolved. "
+            f"See: {review_log}",
+            file=sys.stderr,
+        )
 
 
 def set_execution_substep(project_dir: Path, substep: str | None) -> dict:
@@ -1990,6 +2089,7 @@ def _cli_update_pccs_cal(args) -> int:
             step_key = f"step-{step}"
             pccs["history"][step_key] = {
                 "mean_pccs": summary.get("mean_pccs", 0),
+                "mode": report.get("mode", "DEGRADED"),
                 "green": summary.get("green", 0),
                 "yellow": summary.get("yellow", 0),
                 "red": summary.get("red", 0),

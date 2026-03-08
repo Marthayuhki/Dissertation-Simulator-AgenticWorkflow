@@ -200,16 +200,22 @@ def compute_decision(claims: list[dict[str, Any]]) -> dict[str, Any]:
 # pCAE — predicted Claim Alignment Error (inter-claim consistency)
 # =============================================================================
 
-def compute_pcae(claims: list[dict[str, Any]]) -> dict[str, list[Any]]:
+def compute_pcae(
+    claims: list[dict[str, Any]],
+    critic_additions: list[dict[str, Any]] | None = None,
+) -> dict[str, list[Any]]:
     """Detect inter-claim inconsistencies (P1 deterministic).
 
     E1: Numeric contradictions — claims citing conflicting statistics.
     E2: Duplicate detection — claims with same source and similar text.
     E3: Source conflicts — same source cited with different conclusions.
+    E4: Critic additions — issues flagged by @claim-quality-critic that
+        the evaluator missed. Previously dead data, now surfaced.
     """
     e1: list[dict[str, str]] = []
     e2: list[dict[str, str]] = []
     e3: list[dict[str, str]] = []
+    e4: list[dict[str, Any]] = critic_additions or []
 
     # Build source index for E2/E3
     source_index: dict[str, list[str]] = {}
@@ -235,6 +241,7 @@ def compute_pcae(claims: list[dict[str, Any]]) -> dict[str, list[Any]]:
         "e2_duplicate_claims": e2,
         "e3_source_conflicts": e3,
         "e3_status": "not_implemented",
+        "e4_critic_additions": e4,
     }
 
 
@@ -289,6 +296,32 @@ def _get_llm_score(
     return None
 
 
+def _check_disagreement(
+    claim_id: str,
+    assessment: dict[str, Any] | None,
+    critic: dict[str, Any] | None,
+) -> bool:
+    """Check if evaluator and critic scores disagree significantly (|diff| >= 20)."""
+    eval_score: int | None = None
+    critic_score: int | None = None
+
+    if assessment:
+        for a in assessment.get("assessments", []):
+            if a.get("claim_id") == claim_id:
+                eval_score = a.get("quality_score")
+                break
+
+    if critic:
+        for j in critic.get("judgments", []):
+            if j.get("claim_id") == claim_id:
+                critic_score = j.get("adjusted_score")
+                break
+
+    if eval_score is not None and critic_score is not None:
+        return abs(eval_score - critic_score) >= 20
+    return False
+
+
 def generate_report(
     claim_map_path: str,
     assessment_path: str | None = None,
@@ -305,10 +338,12 @@ def generate_report(
         return {
             "step": -1,
             "file": "",
-            "summary": {"total_claims": 0, "green": 0, "yellow": 0, "red": 0, "mean_pccs": 0},
+            "mode": "DEGRADED",
+            "summary": {"total_claims": 0, "green": 0, "yellow": 0, "red": 0, "mean_pccs": 0, "disagreement_count": 0},
+            "calibration": {"cal_delta": 0.0, "total_samples": 0},
             "decision": {"action": "proceed", "red_claim_ids": []},
             "claims": [],
-            "pcae": {"e1_numeric_contradictions": [], "e2_duplicate_claims": [], "e3_source_conflicts": []},
+            "pcae": {"e1_numeric_contradictions": [], "e2_duplicate_claims": [], "e3_source_conflicts": [], "e4_critic_additions": []},
             "error": f"Failed to load claim-map: {claim_map_path}",
         }
 
@@ -316,10 +351,19 @@ def generate_report(
     critic = _load_json(critic_path)
     calibration = _load_json(calibration_path)
 
+    # ④ Auto-detect mode: FULL if LLM data provided, DEGRADED otherwise
+    has_llm_data = bool(
+        (assessment and assessment.get("assessments"))
+        or (critic and critic.get("judgments"))
+    )
+    mode = "FULL" if has_llm_data else "DEGRADED"
+
     # Get calibration delta (default 0 if no calibration data)
     cal_delta = 0.0
+    cal_total_samples = 0
     if calibration:
         cal_delta = calibration.get("cal_delta", 0.0)
+        cal_total_samples = calibration.get("total_samples", 0)  # ⑦
 
     claims_out: list[dict[str, Any]] = []
 
@@ -332,6 +376,9 @@ def generate_report(
 
         # Get LLM assessment score (may be None if B-1/B-2 not available)
         llm_score = _get_llm_score(claim_id, assessment, critic)
+
+        # ⑥ High disagreement flag (|eval - critic| >= 20)
+        high_disagreement = _check_disagreement(claim_id, assessment, critic)
 
         # Use LLM score if available, otherwise raw_agent confidence
         effective_agent = llm_score if llm_score is not None else raw_agent
@@ -349,6 +396,7 @@ def generate_report(
             "blocked": blocked,
             "pccs": pccs,
             "color": color,
+            "high_disagreement": high_disagreement,  # ⑥
         })
 
     # Summary statistics
@@ -357,22 +405,34 @@ def generate_report(
     yellow = sum(1 for c in claims_out if c["color"] == "YELLOW")
     red = sum(1 for c in claims_out if c["color"] == "RED")
     mean_pccs = round(sum(c["pccs"] for c in claims_out) / max(total, 1), 1)
+    disagreement_count = sum(1 for c in claims_out if c["high_disagreement"])
 
     # Decision matrix
     decision = compute_decision(claims_out)
 
-    # pCAE
-    pcae = compute_pcae(claim_map.get("claims", []))
+    # ⑤ Extract critic additions (previously dead data)
+    critic_additions: list[dict[str, Any]] = []
+    if critic:
+        critic_additions = critic.get("additions", [])
+
+    # pCAE (with critic additions connected)
+    pcae = compute_pcae(claim_map.get("claims", []), critic_additions)
 
     return {
         "step": claim_map.get("step", -1),
         "file": claim_map.get("file", ""),
+        "mode": mode,  # ④
         "summary": {
             "total_claims": total,
             "green": green,
             "yellow": yellow,
             "red": red,
             "mean_pccs": mean_pccs,
+            "disagreement_count": disagreement_count,  # ⑥
+        },
+        "calibration": {  # ⑦
+            "cal_delta": cal_delta,
+            "total_samples": cal_total_samples,
         },
         "decision": decision,
         "claims": claims_out,

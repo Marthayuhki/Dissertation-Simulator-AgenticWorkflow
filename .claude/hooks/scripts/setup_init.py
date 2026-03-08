@@ -97,6 +97,21 @@ REQUIRED_SCRIPTS = [
     "validate_pccs_output.py",
     "validate_pccs_assessment.py",
     "pccs_calibration.py",
+    "run_pccs_pipeline.py",
+    # Predictive Debugging pipeline (Phase J)
+    "extract_json_block.py",
+    "scan_code_structure.py",
+    "validate_failure_predictions.py",
+    "generate_failure_report.py",
+    # P1 validators (Phase K)
+    "validate_agent_dna.py",
+    "validate_claim_inheritance.py",
+    "validate_dialogue_state.py",
+    "validate_team_synthesis.py",
+    # Type checking hook
+    "run_mypy_check.py",
+    # Step Execution Registry — H-1~H-4 hallucination containment (Phase L)
+    "query_step.py",
 ]
 
 # Severity levels

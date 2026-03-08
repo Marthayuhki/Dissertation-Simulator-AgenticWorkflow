@@ -81,7 +81,7 @@ AgenticWorkflow/
 │   └── code-change-protocol.md      (CCP 3단계 + CAP + 비례성 규칙)
 ├── .claude/
 │   ├── settings.json                ← Hook 설정
-│   ├── agents/                      ← Sub-agent 정의 (58개: 기반 10 + 논문 48)
+│   ├── agents/                      ← Sub-agent 정의 (58개: 기반 11 + 논문 46 + 통합 1)
 │   │   ├── translator.md            (영→한 번역, glossary 기반)
 │   │   ├── translation-verifier.md  (번역 품질 검증, 독립 Layer 2 pACS)
 │   │   ├── reviewer.md              (적대적 리뷰어, Enhanced L2)
@@ -159,9 +159,11 @@ AgenticWorkflow/
 │   │   ├── compute_pccs_signals.py  (pCCS Phase A — P1 signal 추출, claim-map 생성)
 │   │   ├── validate_pccs_assessment.py (pCCS Phase C — CA1-CA5 LLM 평가 검증, P1 결정론적)
 │   │   ├── generate_pccs_report.py  (pCCS Phase D — P1 합성, 최종 pCCS 점수 계산)
-│   │   ├── validate_pccs_output.py  (pCCS PC1-PC6 구조 검증, P1 결정론적)
+│   │   ├── validate_pccs_output.py  (pCCS PC1-PC7 구조 검증, P1 결정론적)
 │   │   ├── pccs_calibration.py      (pCCS 교정 delta 계산 — fact-checker/L1 기반, P1 결정론적)
-│   │   └── _test_*.py (36개)        (유닛 테스트 — 각 프로덕션 스크립트 대응)
+│   │   ├── run_pccs_pipeline.py     (pCCS P1 Pipeline Runner — DEGRADED/FULL 모드 단일 진입점, 할루시네이션 방지)
+│   │   ├── query_step.py           (Step Execution Registry — H-1~H-4 결정론적 step→agent/tier/critic/pCCS 매핑, P1)
+│   │   └── _test_*.py (39개)        (유닛 테스트 — 각 프로덕션 스크립트 대응)
 │   ├── context-snapshots/           ← 런타임 (gitignored)
 │   └── skills/
 │       ├── workflow-generator/      (워크플로우 설계·생성)

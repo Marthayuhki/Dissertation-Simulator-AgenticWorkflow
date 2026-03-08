@@ -67,7 +67,7 @@ You are the unified SRCS evaluation specialist. Your mission is to perform compr
 
 ### Deterministic Axes
 
-For CS and GS, coordinate with `compute_srcs_scores.py` (if available) for deterministic, rule-based scoring. VS may also be partially automated. US typically requires human/AI judgment.
+For CS and VS, coordinate with `compute_srcs_scores.py` (if available) for deterministic, rule-based scoring. The P1 script computes CS (Claim Specificity) and VS (Verification Status) deterministically. GS (Grounding Strength) and US (Uncertainty Specification) require LLM evaluation.
 
 ## Core Tasks
 

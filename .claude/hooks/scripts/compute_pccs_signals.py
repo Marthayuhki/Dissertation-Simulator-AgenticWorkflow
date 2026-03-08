@@ -92,24 +92,45 @@ _P1_BASE = 50
 
 
 def _extract_claim_context(content: str, claim_id: str) -> str:
-    """Extract ~500 chars of context around a claim ID for signal analysis.
+    """Extract context for a claim using natural claim block boundaries.
 
-    Searches for the claim_id in content and returns surrounding text
-    for blocked/source pattern detection.
-
-    Known limitation: When two claims are within ~500 chars of each other,
-    their context windows may overlap. A blocked pattern near claim A could
-    theoretically trigger A3 for adjacent claim B. In practice, thesis claim
-    blocks are typically well-separated (500+ chars apart).
+    Uses adjacent claim IDs as boundaries instead of a fixed character window.
+    The previous claim_id occurrence (or start of file) marks the block start,
+    and the next claim_id occurrence (or end of file) marks the block end.
+    The block is capped at 800 chars max to keep signal analysis bounded.
     """
     # Find the claim ID in content
     pattern = re.compile(re.escape(claim_id))
     match = pattern.search(content)
     if not match:
         return ""
-    start = max(0, match.start() - 300)
-    end = min(len(content), match.end() + 200)
-    return content[start:end]
+
+    # Find natural boundaries using any claim_id pattern (e.g., "EMP-001", "THEO-NEURO-003")
+    # Matches standard claim ID format: 2-4 uppercase letters, optional sub-prefix, dash, digits
+    claim_id_boundary = re.compile(r'[A-Z]{2,4}(?:-[A-Z]{2,})*-\d{3,}')
+
+    # Find previous claim_id (block start)
+    block_start = 0
+    for prev_match in claim_id_boundary.finditer(content, 0, match.start()):
+        if prev_match.group() != claim_id:
+            block_start = prev_match.start()
+
+    # Find next claim_id (block end)
+    block_end = len(content)
+    for next_match in claim_id_boundary.finditer(content, match.end()):
+        if next_match.group() != claim_id:
+            block_end = next_match.start()
+            break
+
+    # Cap at 800 chars max, centered on the claim_id
+    block_len = block_end - block_start
+    if block_len > 800:
+        center = match.start()
+        half = 400
+        block_start = max(block_start, center - half)
+        block_end = min(block_end, block_start + 800)
+
+    return content[block_start:block_end]
 
 
 def compute_p1_signals(

@@ -2,7 +2,7 @@
 name: thesis-orchestrator
 description: Master orchestrator for the doctoral research workflow. Manages the full thesis lifecycle from initialization through publication, coordinating Agent Teams, sub-agents, quality gates, and SOT.
 model: opus
-tools: Read, Write, Glob, Grep, Bash, Agent, TaskCreate, TaskUpdate, TaskList, TeamCreate, SendMessage
+tools: Read, Write, Glob, Grep, Bash, Agent, TaskCreate, TaskUpdate, TaskList, TeamCreate, TeamDelete, SendMessage
 maxTurns: 150
 memory: project
 ---
@@ -87,7 +87,7 @@ This bridges the thesis SOT `execution_mode` to the existing activation mechanis
 
 For each step in the workflow, execute this loop:
 
-**E1. Read SOT, validate dependencies, and determine tier:**
+**E1. Read SOT, validate dependencies, and query step registry:**
 ```bash
 python3 .claude/hooks/scripts/checklist_manager.py --status --project-dir {dir}
 python3 .claude/hooks/scripts/checklist_manager.py --validate --project-dir {dir}
@@ -96,13 +96,29 @@ python3 .claude/hooks/scripts/validate_step_sequence.py --step {N} --project-dir
 ```
 **If `validate_step_sequence.py` returns `"can_proceed": false`** → STOP. Do not execute this step. Resolve the blocking dependency (gate failure, missing prerequisite) first. The `--json` flag outputs a JSON object with `can_proceed`, `errors`, and `warnings` fields.
 
-**HITL blocking check** (for steps at HITL boundaries):
+**MANDATORY: Query Step Execution Registry** (P1 deterministic — prevents hallucination):
+```bash
+python3 .claude/hooks/scripts/query_step.py --step {N} --project-dir {dir} --json
+```
+This returns a JSON object with ALL execution parameters:
+- `agent`: which sub-agent to invoke (or `_orchestrator` for direct execution)
+- `tier`: execution tier (2=sub-agent, 3=direct)
+- `critic`: which critic agent to use (and `critic_secondary` if parallel)
+- `dialogue_domain`: "research" or "development" (or null)
+- `pccs_mode`: "FULL" or "DEGRADED" (or null if not applicable)
+- `pccs_required`: whether pCCS scoring applies
+- `hitl`: HITL checkpoint name (or null)
+- `output_path`: expected output file path pattern
+
+**DO NOT interpret prose rules for agent/tier/critic/pCCS selection — use the JSON output directly.**
+
+**HITL blocking check** (for steps where `hitl_required` is true):
 ```bash
 python3 .claude/hooks/scripts/checklist_manager.py --is-hitl-blocking --project-dir {dir} --hitl-name {hitl-name}
 ```
 If HITL is blocking → wait for user approval via AskUserQuestion before proceeding.
 
-Determine the current phase from `current_step`. Look up the Wave-to-Team Mapping table below. If the step belongs to a wave/phase with a team defined → use **Tier 1 (Agent Team)**. If sequential (Wave 4-5) → use **Tier 2 (Sub-agent)**. If Phase 0 → use **Tier 2 or Tier 3** depending on step complexity.
+The execution tier, agent, critic, and pCCS mode are ALL determined by `query_step.py` output (deterministic). Default is **Tier 2 (Sub-agent)** for all agent steps. The Wave-to-Team Mapping defines team composition for when Tier 1 IS selected, but does NOT override the Step-to-Tier decision from the registry.
 
 **E2. Execute (Tier 1 — Agent Team):**
 
@@ -166,41 +182,38 @@ python3 .claude/hooks/scripts/fallback_controller.py \
 4b. **(Tier A steps only) L1.7 pCCS — per-claim confidence scoring:**
    Only for steps with GroundedClaim output (88 Tier A steps). Non-claim steps (Tier B) skip to step 5.
 
-   **Mode selection** — Choose FULL or DEGRADED based on step importance:
-   - **FULL mode** (recommended for Gate steps + high-importance Tier A): Runs Phase A → B-1 → C-1 → B-2 → C-2 → D. Provides semantic quality evaluation via LLM sub-agents.
-   - **DEGRADED mode** (acceptable for routine Tier A steps): Runs Phase A → D only. Scores are based on P1 signals + raw confidence. No LLM semantic evaluation — pCCS reflects structural quality only, not meaning.
+   **Mode selection** — determined by `query_step.py` output (field: `pccs_mode`). DO NOT choose manually:
+   - **FULL mode** (`pccs_mode: "FULL"`): Runs Phase A → B-1 → C-1 → B-2 → C-2 → D. Provides semantic quality evaluation via LLM sub-agents.
+   - **DEGRADED mode** (`pccs_mode: "DEGRADED"`): Runs Phase A → D only. Scores are based on P1 signals + raw confidence. No LLM semantic evaluation — pCCS reflects structural quality only, not meaning.
+   - If `pccs_required: false` → skip this entire sub-step (Tier B step).
 
-   **DEGRADED mode** (default — Phase A + D):
+   **DEGRADED mode** (default — single call handles A → Calibration → D → PC1-PC6 → SOT):
    ```bash
-   # Phase A: P1 signal extraction
-   python3 .claude/hooks/scripts/compute_pccs_signals.py --file {output_file} --step {N} --output /tmp/pccs/claim-map.json
-   # Phase D: P1 synthesis (ALL arithmetic is Python)
-   python3 .claude/hooks/scripts/generate_pccs_report.py --claim-map /tmp/pccs/claim-map.json --output /tmp/pccs/pccs-report.json
-   # PC1-PC6 validation
-   python3 .claude/hooks/scripts/validate_pccs_output.py --report /tmp/pccs/pccs-report.json
-   # Update SOT
-   python3 .claude/hooks/scripts/checklist_manager.py --update-pccs-cal --project-dir {dir} --pccs-report /tmp/pccs/pccs-report.json
+   python3 .claude/hooks/scripts/run_pccs_pipeline.py --mode degraded --file {output_file} --step {N} --project-dir {dir}
    ```
 
-   **FULL mode** (Gate steps — add between Phase A and D):
+   **FULL mode** (Gate steps — 3 calls bracketing 2 LLM sub-agents):
    ```bash
-   # Phase A: (same as above)
-   python3 .claude/hooks/scripts/compute_pccs_signals.py --file {output_file} --step {N} --output /tmp/pccs/claim-map.json
+   # Phase 1: Prepare (Phase A + Calibration → claim-map.json)
+   python3 .claude/hooks/scripts/run_pccs_pipeline.py --mode full --phase prepare --file {output_file} --step {N} --project-dir {dir} --work-dir /tmp/pccs-{N}
+   ```
+   ```
    # Phase B-1: LLM semantic evaluation
-   Agent(prompt="Read /tmp/pccs/claim-map.json. Evaluate each claim on Specificity, Evidence Alignment, Logical Soundness, Contribution (0-25 each).", subagent_type="claim-quality-evaluator")
-   python3 .claude/hooks/scripts/extract_json_block.py --input {b1_response} --output /tmp/pccs/pccs-assessment.json
-   # Phase C-1: P1 validation of evaluator output
-   python3 .claude/hooks/scripts/validate_pccs_assessment.py --assessment /tmp/pccs/pccs-assessment.json --claim-map /tmp/pccs/claim-map.json --mode evaluator
+   Agent(prompt="Read /tmp/pccs-{N}/claim-map.json. Evaluate each claim on Specificity, Evidence Alignment, Logical Soundness, Contribution (0-25 each). Output as ```json block.", subagent_type="claim-quality-evaluator")
+   # Save response text to file: Write {b1_response_text} → /tmp/pccs-{N}/b1-response.txt
+   ```
+   ```bash
+   # Phase 2: After B-1 (Extract + CA1-CA8 validation)
+   python3 .claude/hooks/scripts/run_pccs_pipeline.py --mode full --phase after-b1 --work-dir /tmp/pccs-{N} --b1-response /tmp/pccs-{N}/b1-response.txt
+   ```
+   ```
    # Phase B-2: Adversarial critic
-   Agent(prompt="Read /tmp/pccs/claim-map.json and /tmp/pccs/pccs-assessment.json. Challenge over-confident scores.", subagent_type="claim-quality-critic")
-   python3 .claude/hooks/scripts/extract_json_block.py --input {b2_response} --output /tmp/pccs/pccs-critic.json
-   # Phase C-2: P1 validation of critic output
-   python3 .claude/hooks/scripts/validate_pccs_assessment.py --assessment /tmp/pccs/pccs-critic.json --claim-map /tmp/pccs/claim-map.json --mode critic
-   # Phase D: P1 synthesis with LLM data
-   python3 .claude/hooks/scripts/generate_pccs_report.py --claim-map /tmp/pccs/claim-map.json --assessment /tmp/pccs/pccs-assessment.json --critic /tmp/pccs/pccs-critic.json --output /tmp/pccs/pccs-report.json
-   # PC1-PC6 validation + SOT update: (same as degraded)
-   python3 .claude/hooks/scripts/validate_pccs_output.py --report /tmp/pccs/pccs-report.json
-   python3 .claude/hooks/scripts/checklist_manager.py --update-pccs-cal --project-dir {dir} --pccs-report /tmp/pccs/pccs-report.json
+   Agent(prompt="Read /tmp/pccs-{N}/claim-map.json and /tmp/pccs-{N}/pccs-assessment.json. Challenge over-confident scores. Output as ```json block.", subagent_type="claim-quality-critic")
+   # Save response text to file: Write {b2_response_text} → /tmp/pccs-{N}/b2-response.txt
+   ```
+   ```bash
+   # Phase 3: Finalize (Extract + CA1-CA5 + Phase D + PC1-PC6 + SOT)
+   python3 .claude/hooks/scripts/run_pccs_pipeline.py --mode full --phase finalize --work-dir /tmp/pccs-{N} --b2-response /tmp/pccs-{N}/b2-response.txt --project-dir {dir}
    ```
 
    Record sub-step:
@@ -211,15 +224,16 @@ python3 .claude/hooks/scripts/fallback_controller.py \
    - `proceed` → continue to step 5
    - `rewrite_claims` → rewrite only the RED claim IDs, then re-run Phase A+D
    - `rewrite_step` → re-execute the entire step (count against retry budget)
-5. **Invoke critic agent(s) and persist report** → `review-logs/step-{N}-review.md` (L2 Enhanced steps only)
+5. **Invoke critic agent(s) and persist report** → `review-logs/step-{N}-review.md` (L2 Enhanced steps only — `l2_enhanced: true` from `query_step.py`)
 
-   **Domain routing** (determined by workflow `Dialogue:` field):
+   **Domain routing** — determined by `query_step.py` output (fields: `critic`, `critic_secondary`, `dialogue_domain`). DO NOT interpret prose rules:
 
-   | Workflow field | Critic agent | Report path |
-   |---------------|-------------|-------------|
-   | `Review: @reviewer` (no dialogue) | `@reviewer` | `review-logs/step-{N}-review.md` |
-   | `Dialogue: research` | `@fact-checker` + `@reviewer` in **parallel** | `dialogue-logs/step-{N}-r{K}-fc.md` + `dialogue-logs/step-{N}-r{K}-rv.md` |
-   | `Dialogue: development` | `@code-reviewer` | `dialogue-logs/step-{N}-r{K}-cr.md` |
+   | `query_step.py` output | Critic agent | Report path |
+   |----------------------|-------------|-------------|
+   | `critic: "reviewer"`, `dialogue: false` | `@reviewer` | `review-logs/step-{N}-review.md` |
+   | `critic: "fact-checker"`, `critic_secondary: "reviewer"`, `dialogue_domain: "research"` | `@fact-checker` + `@reviewer` in **parallel** | `dialogue-logs/step-{N}-r{K}-fc.md` + `dialogue-logs/step-{N}-r{K}-rv.md` |
+   | `critic: "code-reviewer"`, `dialogue_domain: "development"` | `@code-reviewer` | `dialogue-logs/step-{N}-r{K}-cr.md` |
+   | `critic: null` | No critic — skip this sub-step | — |
 
    **Single-review path** (`Review:` without `Dialogue:`):
    - Call @reviewer sub-agent on the step's output file

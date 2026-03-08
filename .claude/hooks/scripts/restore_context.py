@@ -942,7 +942,8 @@ def _surface_failure_predictions(project_dir: str) -> list[str]:
     """
     active_risks_path = os.path.join(project_dir, "failure-predictions", "active-risks.md")
     if not os.path.exists(active_risks_path):
-        return []
+        # Distinguish "no predictions" from "zero risk" — unknown ≠ safe
+        return ["■ FAILURE PREDICTIONS UNAVAILABLE — run /predict-failures for cross-domain risk assessment"]
 
     try:
         import time
@@ -976,6 +977,55 @@ def _surface_failure_predictions(project_dir: str) -> list[str]:
         return []
 
 
+def _surface_active_team(project_dir: str) -> list[str]:
+    """Surface active Agent Team state for IMMORTAL section.
+
+    If an Agent Team was in progress when context reset occurred,
+    the Orchestrator needs to know: team name, pending/completed tasks,
+    current tier. Without this, Orchestrator may restart team from scratch
+    or create duplicate teams.
+
+    P1 Compliance: JSON read + dict formatting — deterministic.
+    SOT Compliance: Read-only.
+    Returns: list of lines (empty if no active team).
+    """
+    sot_path, sot = _read_active_thesis_sot(project_dir)
+    if not sot_path or not sot:
+        return []
+
+    active_team = sot.get("active_team")
+    if not active_team or not isinstance(active_team, dict):
+        return []
+
+    # Only surface if team is actually active (not completed/cancelled)
+    status = active_team.get("status", "")
+    if status in ("completed", "cancelled"):
+        return []
+
+    lines: list[str] = []
+    name = active_team.get("name", "?")
+    lines.append(f"■ ACTIVE AGENT TEAM (IMMORTAL — resume, do NOT recreate):")
+    lines.append(f"  team: {name}, status: {status}")
+
+    # Task summary
+    pending = active_team.get("tasks_pending", [])
+    completed = active_team.get("tasks_completed", [])
+    if isinstance(pending, list):
+        lines.append(f"  pending: {len(pending)} tasks")
+        for t in pending[:3]:
+            if isinstance(t, dict):
+                agent = t.get("agent", "?")
+                task_status = t.get("status", "?")
+                lines.append(f"    - {agent}: {task_status}")
+            elif isinstance(t, str):
+                lines.append(f"    - {t}")
+    if isinstance(completed, list) and completed:
+        lines.append(f"  completed: {len(completed)} tasks")
+
+    lines.append("  ⚠ Task IDs are session-scoped — re-query TaskList before resuming")
+    return lines
+
+
 def _surface_pccs_state(project_dir: str) -> list[str]:
     """Surface pCCS state from thesis SOT for IMMORTAL section.
 
@@ -987,8 +1037,8 @@ def _surface_pccs_state(project_dir: str) -> list[str]:
     SOT Compliance: Read-only.
     Returns: list of lines (empty if no pCCS data).
     """
-    sot = _read_active_thesis_sot(project_dir)
-    if not sot:
+    sot_path, sot = _read_active_thesis_sot(project_dir)
+    if not sot_path or not sot:
         return []
 
     pccs = sot.get("pccs")
@@ -1003,10 +1053,11 @@ def _surface_pccs_state(project_dir: str) -> list[str]:
     lines.append(f"■ pCCS STATE (IMMORTAL — per-claim confidence scoring):")
     lines.append(f"  cal_delta={cal_delta}, last_step={last_step}, cal_samples={total_samples}")
 
-    # Surface last 3 step results from history
+    # Surface last 3 step results from history + trend detection
     history = pccs.get("history")
     if isinstance(history, dict) and history:
         sorted_keys = sorted(history.keys(), reverse=True)[:3]
+        means = []
         for key in sorted_keys:
             entry = history[key]
             if isinstance(entry, dict):
@@ -1014,7 +1065,30 @@ def _surface_pccs_state(project_dir: str) -> list[str]:
                 action = entry.get("action", "?")
                 green = entry.get("green", "?")
                 red = entry.get("red", "?")
-                lines.append(f"  {key}: mean={mean}, G={green}/R={red}, action={action}")
+                mode = entry.get("mode", "?")
+                lines.append(f"  {key}: mean={mean}, G={green}/R={red}, action={action}, mode={mode}")
+                if isinstance(mean, (int, float)):
+                    means.append(mean)
+
+        # Trend detection: direction of mean_pccs across last 3 steps
+        if len(means) >= 2:
+            # means[0] = most recent, means[-1] = oldest
+            delta = means[0] - means[-1]
+            if delta > 3:
+                trend = f"↑ improving (+{delta:.1f})"
+            elif delta < -3:
+                trend = f"↓ declining ({delta:.1f})"
+            else:
+                trend = f"→ stable ({delta:+.1f})"
+            lines.append(f"  trend: {trend}")
+
+            # Consecutive rewrite warning
+            rewrite_actions = [
+                history[k].get("action", "") for k in sorted_keys[:2]
+                if isinstance(history.get(k), dict)
+            ]
+            if all(a in ("rewrite_claims", "rewrite_step") for a in rewrite_actions if a):
+                lines.append(f"  ⚠ consecutive rewrites detected — possible systemic quality issue")
 
     return lines
 
@@ -1280,6 +1354,15 @@ def _build_recovery_output(source, latest_path, summary, sot_warning, snapshot_a
                 for dh in diagnosis_hints[:3]:
                     output_lines.append(f"  - {dh}")
 
+            # P1-2b: Hypothesis Graveyard — tried-and-failed approaches
+            # Prevents repeating dead-end approaches after context reset
+            rejected_hints = _extract_recent_rejected_hypotheses(recent)
+            if rejected_hints:
+                output_lines.append("")
+                output_lines.append("■ 실패한 접근법 (반복 방지 — 자동 표면화):")
+                for rh in rejected_hints[:5]:
+                    output_lines.append(f"  - {rh}")
+
             # P1-3: Proactive Team Summary surfacing
             # Surface recent team coordination history for quality continuity
             team_hints = _extract_recent_team_summaries(recent)
@@ -1415,6 +1498,13 @@ def _build_recovery_output(source, latest_path, summary, sot_warning, snapshot_a
         output_lines.append("")
         for fpl in failure_pred_lines:
             output_lines.append(fpl)
+
+    # Active Agent Team (IMMORTAL — resume, do NOT recreate)
+    team_lines = _surface_active_team(project_dir) if project_dir else []
+    if team_lines:
+        output_lines.append("")
+        for tl in team_lines:
+            output_lines.append(tl)
 
     # pCCS State (IMMORTAL — per-claim confidence scoring)
     pccs_lines = _surface_pccs_state(project_dir) if project_dir else []
@@ -1575,6 +1665,33 @@ def _extract_recent_diagnosis_patterns(recent_sessions):
         if len(results) >= 3:
             break
     return results[:3]
+
+
+def _extract_recent_rejected_hypotheses(recent_sessions):
+    """P1-2b: Extract tried-and-failed approaches from recent Knowledge Archive sessions.
+
+    Prevents repeating dead-end approaches after context reset by surfacing
+    the hypothesis graveyard (extracted by _context_lib._extract_hypothesis_graveyard
+    and stored as 'rejected_hypotheses' in knowledge-index entries).
+
+    P1 Compliance: Deterministic extraction from structured JSON data.
+    Returns: list of human-readable strings (max 5).
+    """
+    results = []
+    for session in reversed(recent_sessions):
+        rejected = session.get("rejected_hypotheses", [])
+        if not isinstance(rejected, list):
+            continue
+        for rh in rejected:
+            if not isinstance(rh, dict):
+                continue
+            text = rh.get("text", "?")
+            status = rh.get("status", "tried")
+            outcome = rh.get("outcome", "failed")
+            results.append(f"[{status}] {text} → {outcome}")
+        if len(results) >= 5:
+            break
+    return results[:5]
 
 
 def _extract_recent_team_summaries(recent_sessions):

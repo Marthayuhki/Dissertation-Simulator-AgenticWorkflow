@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""validate_pccs_output.py — PC1-PC6 Structural Validation for pCCS Reports.
+"""validate_pccs_output.py — PC1-PC7 Structural Validation for pCCS Reports.
 
 P1 deterministic validation of pCCS report structure and score integrity.
 Run after generate_pccs_report.py (Phase D) to verify output correctness.
@@ -11,6 +11,7 @@ Checks:
   PC4: Decision matrix consistent with RED count
   PC5: Summary counts match actual claim colors
   PC6: Claim IDs unique (no duplicates)
+  PC7: Mode field valid (FULL or DEGRADED) if present
 
 Usage:
   python3 validate_pccs_output.py --report pccs-report.json
@@ -130,6 +131,14 @@ def validate_pccs_report(report: dict[str, Any]) -> dict[str, Any]:
             pc6_pass = False
         seen_ids.add(cid)
     checks.append({"id": "PC6", "name": "Unique claim IDs", "passed": pc6_pass})
+
+    # PC7: Mode field valid (if present)
+    pc7_pass = True
+    mode = report.get("mode")
+    if mode is not None and mode not in ("FULL", "DEGRADED"):
+        errors.append(f"PC7: mode='{mode}' invalid (expected FULL or DEGRADED)")
+        pc7_pass = False
+    checks.append({"id": "PC7", "name": "Mode valid", "passed": pc7_pass})
 
     return {
         "passed": len(errors) == 0,

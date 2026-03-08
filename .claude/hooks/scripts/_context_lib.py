@@ -930,6 +930,10 @@ def validate_sot_schema(ap_state):
                             warnings.append(f"SOT schema: pccs.history.{pkey} missing 'mean_pccs'")
                         if "action" not in pval:
                             warnings.append(f"SOT schema: pccs.history.{pkey} missing 'action'")
+                        # S11d: mode must be FULL or DEGRADED if present
+                        mode = pval.get("mode")
+                        if mode is not None and mode not in ("FULL", "DEGRADED"):
+                            warnings.append(f"SOT schema: pccs.history.{pkey}.mode='{mode}' invalid (expected FULL/DEGRADED)")
 
     return warnings
 
@@ -3028,6 +3032,7 @@ _KI_REQUIRED_DEFAULTS = {
     "completion_summary": {},
     "diagnosis_patterns": [],
     "thesis_step": None,  # CM-3: thesis current_step at archive time (int or None)
+    "gate_results": {},  # R-12: cross-session gate pass/fail tracking (e.g. {"gate-1": "pass"})
 }
 
 
@@ -3469,6 +3474,42 @@ def _classify_session_type(user_task, last_instruction, phase):
     return phase_map.get(phase, "")
 
 
+def _extract_gate_results_snapshot(project_dir):
+    """R-12: Extract gate pass/fail snapshot for cross-session trend detection.
+
+    Reads thesis SOT gates block and returns compact pass/fail dict.
+    Used by knowledge-index archival for multi-session gate trend analysis.
+
+    P1 Compliance: Deterministic JSON read, read-only.
+    Returns: dict like {"gate-1": "pass", "gate-2": "fail"} or None.
+    """
+    try:
+        thesis_root = os.path.join(project_dir, "thesis-output")
+        if not os.path.isdir(thesis_root):
+            return None
+        for proj_name in sorted(os.listdir(thesis_root)):
+            sot_path = os.path.join(thesis_root, proj_name, "session.json")
+            if not os.path.isfile(sot_path):
+                continue
+            with open(sot_path, "r", encoding="utf-8") as f:
+                sot = json.load(f)
+            status = sot.get("status", "")
+            if status in ("completed", "paused"):
+                continue
+            gates = sot.get("gates", {})
+            if not isinstance(gates, dict) or not gates:
+                return None
+            result = {}
+            for gname, gdata in gates.items():
+                if isinstance(gdata, dict):
+                    result[gname] = gdata.get("status", "pending")
+                else:
+                    result[gname] = str(gdata)
+            return result if result else None
+    except Exception:
+        return None
+
+
 def _extract_thesis_step_at_archive(project_dir):
     """CM-3: Read current_step from active thesis session.json at archive time.
 
@@ -3768,6 +3809,12 @@ def extract_session_facts(session_id, trigger, project_dir, entries, token_estim
     session_type = _classify_session_type(user_task, last_instruction, phase)
     if session_type:
         facts["session_type"] = session_type
+
+    # R-12: gate_results — cross-session gate pass/fail for trend detection
+    if thesis_continuity:
+        gate_snapshot = _extract_gate_results_snapshot(project_dir)
+        if gate_snapshot:
+            facts["gate_results"] = gate_snapshot
 
     # CM-3: thesis_step — thesis current_step at archive time for proximity scoring.
     # Scalar int (not a range). Used by _retrieve_relevant_sessions() for step boost.

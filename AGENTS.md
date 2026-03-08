@@ -236,8 +236,8 @@ Task(subagent_type="translator", prompt="...", ...)
 ```
 Team Lead(=Orchestrator)
   1. TeamCreate → SOT active_team 기록
-  2. TaskCreate (subject, description, owner=@teammate, blocks, blockedBy)
-     → blocks/blockedBy: Design-time 의존성 선언 (workflow.md에서 미리 정의)
+  2. TaskCreate (subject, description, owner=@teammate)
+     → Note: blocks/blockedBy 의존성 선언은 설계 예정 (현재 미구현 — Tier 2 기본 사용으로 영향 없음)
   3. Task(subagent_type, team_name, ...) → Teammate 생성
   4. Teammate: 작업 수행 → L1 자기 검증 → L1.5 pACS 자기 채점
   5. Teammate: TaskUpdate(completed) → SendMessage(보고 + pACS 점수)

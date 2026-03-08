@@ -264,22 +264,40 @@ if blocked: pccs = min(pccs, 40.0)
 - Tier 2: L1 Verification (PASS→85, FAIL→30)
 - Weighted: `cal_delta = (tier1_delta × 2.0 + tier2_delta × 1.0) / 3.0`
 
-**P1 Structural Validation** (`validate_pccs_output.py` — PC1-PC6):
+**P1 Structural Validation** (`validate_pccs_output.py` — PC1-PC7):
 - PC1: Required fields, PC2: Score ranges [0,100], PC3: Color classification
 - PC4: Decision matrix consistency, PC5: Summary counts, PC6: Unique claim IDs
+- PC7: Mode field valid (FULL or DEGRADED)
 
 **pCAE** (predicted Claim Alignment Error — inter-claim consistency):
 - E2: Duplicate detection (implemented) — same source cited by multiple claims
+- E4: Critic additions (implemented) — `@claim-quality-critic`의 `additions` 배열이 pCAE에 통합
 - E1/E3: Numeric contradictions, source conflicts (not yet implemented)
 
 **Mode Selection** (thesis-orchestrator.md):
 - **FULL mode**: Phase A→B-1→C-1→B-2→C-2→D (Gate steps + high-importance)
 - **DEGRADED mode**: Phase A→D only (routine steps — structural scoring only, no semantic evaluation)
 
-**SOT Integration**: `checklist_manager.py --update-pccs-cal` writes to `session.json.pccs` block (cal_delta, last_step, history).
-**RLM Integration**: `restore_context.py._surface_pccs_state()` surfaces cal_delta + last 3 step results as IMMORTAL section.
+**Pipeline Runner** (`run_pccs_pipeline.py` — 할루시네이션 방지 단일 진입점):
+- Orchestrator가 8-10개 CLI 명령을 개별 실행하던 패턴을 1~3개 호출로 응축
+- **DEGRADED**: `run_pccs_pipeline.py --mode degraded --file {f} --step {N} --project-dir {dir}` (단일 호출)
+  - Phase A → Calibration → Phase D → PC1-PC7 → SOT 자동 갱신
+- **FULL**: 3개 호출이 2개 LLM 서브에이전트 호출을 브래킷
+  - `--phase prepare` → Phase A + Calibration → claim-map.json
+  - `--phase after-b1` → B-1 JSON 추출 + CA1-CA8 검증
+  - `--phase finalize` → B-2 JSON 추출 + CA1-CA5 + Phase D + PC1-PC7 + SOT
+- Calibration이 pipeline 내부에서 항상 실행되므로 누락 불가능 (disconnected loop fix)
+
+**Report 필드**:
+- `mode`: "FULL" 또는 "DEGRADED" — 실행 모드 추적
+- `calibration`: `{cal_delta, total_samples}` — 교정 메타데이터
+- `summary.disagreement_count`: evaluator-critic 고분쟁 claim 수
+- `claims[].high_disagreement`: |eval_score - critic_score| ≥ 20 여부 (FULL only)
+
+**SOT Integration**: `checklist_manager.py --update-pccs-cal` writes to `session.json.pccs` block (cal_delta, last_step, history). History에 mode 기록.
+**RLM Integration**: `restore_context.py._surface_pccs_state()` surfaces cal_delta + last 3 step results (with mode) as IMMORTAL section.
 
 17→7 Canonical Type Mapping: `_claim_patterns.py.CLAIM_TYPE_TO_CANONICAL` maps actual thesis types (ANALYTICAL, THEOLOGICAL, etc.) to 7 canonical types.
 
-독립 실행 스크립트: `compute_pccs_signals.py`, `generate_pccs_report.py`, `validate_pccs_output.py`, `validate_pccs_assessment.py`, `pccs_calibration.py`.
+독립 실행 스크립트: `compute_pccs_signals.py`, `generate_pccs_report.py`, `validate_pccs_output.py`, `validate_pccs_assessment.py`, `pccs_calibration.py`, `run_pccs_pipeline.py`.
 서브에이전트: `@claim-quality-evaluator` (Phase B-1), `@claim-quality-critic` (Phase B-2).
