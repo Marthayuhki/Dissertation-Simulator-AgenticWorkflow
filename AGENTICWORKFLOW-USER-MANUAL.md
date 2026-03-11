@@ -900,7 +900,7 @@ outputs:
 
 ### 개요
 
-210-step 박사 논문 연구 시뮬레이션 워크플로우입니다. Phase 0(초기화·주제 탐색) → Phase 1(문헌 검토) → Phase 2(연구 설계) → Phase 3(논문 집필) → Phase 4(출판 전략) → Translation(한국어 번역)의 6단계로, 53개 전문 에이전트 (기반 5 + 논문 48)가 논문 연구의 전 과정을 지원합니다.
+211-step 박사 논문 연구 시뮬레이션 워크플로우입니다. Phase 0(초기화·주제 탐색) → Phase 1(문헌 검토) → Phase 2(연구 설계) → Phase 3(논문 집필) → Phase 4(출판 전략) → Translation(한국어 번역)의 6단계로, 53개 전문 에이전트 (기반 5 + 논문 48)가 논문 연구의 전 과정을 지원합니다.
 
 ### 빠른 시작
 
@@ -937,12 +937,13 @@ outputs:
 
 ```
 Phase 0: Initialization + Topic Exploration  (Step 1-38)   ── HITL-0/1
-Phase 1: Literature Review                   (Step 39-104)
-  └── Wave 1-5 + Gate 1-4 + SRCS-Full + HITL-2
-Phase 2: Research Design                     (Step 105-132) ── HITL-3/4
-Phase 3: Thesis Writing                      (Step 133-168) ── HITL-5/6/7
-Phase 4: Publication Strategy                (Step 169-180) ── HITL-8
-Translation: Korean Translation              (Step 181-210)
+Phase 1: Literature Review                   (Step 39-120)
+  └── Wave 1-5 + Gate 1-3 + SRCS-Full + HITL-2
+Phase 2: Research Design                     (Step 121-140) ── HITL-3/4
+Phase 3: Thesis Writing                      (Step 141-164) ── HITL-5/6/7
+Phase 4: Publication Strategy                (Step 165-172) ── HITL-8
+Phase 5: Finalization                        (Step 173-180)
+Phase 6: Translation + Export                (Step 181-211)
 ```
 
 ### 논문 SOT (`session.json`)

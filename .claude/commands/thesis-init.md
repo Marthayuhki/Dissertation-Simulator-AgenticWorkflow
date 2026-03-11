@@ -66,7 +66,7 @@ export THESIS_ORCHESTRATOR=1
 Display:
 - Created project directory and structure
 - Selected settings (research type, input mode, academic field, **execution mode**)
-- Total workflow steps (210)
+- Total workflow steps (211)
 - Next step preview
 
 ### Step 5: Auto-Continue to Workflow

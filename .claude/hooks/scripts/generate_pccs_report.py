@@ -338,13 +338,27 @@ def generate_report(
         return {
             "step": -1,
             "file": "",
-            "mode": "DEGRADED",
+            "mode": "ERROR",
             "summary": {"total_claims": 0, "green": 0, "yellow": 0, "red": 0, "mean_pccs": 0, "disagreement_count": 0},
             "calibration": {"cal_delta": 0.0, "total_samples": 0},
-            "decision": {"action": "proceed", "red_claim_ids": []},
+            "decision": {"action": "rewrite_step", "red_claim_ids": [], "reason": "claim_map_load_failed"},
             "claims": [],
             "pcae": {"e1_numeric_contradictions": [], "e2_duplicate_claims": [], "e3_source_conflicts": [], "e4_critic_additions": []},
             "error": f"Failed to load claim-map: {claim_map_path}",
+        }
+
+    # Guard: empty claim-map → force rewrite_step (prevents silent bypass)
+    if not claim_map.get("claims"):
+        return {
+            "step": claim_map.get("step", -1),
+            "file": claim_map.get("file", ""),
+            "mode": "ERROR",
+            "summary": {"total_claims": 0, "green": 0, "yellow": 0, "red": 0, "mean_pccs": 0, "disagreement_count": 0},
+            "calibration": {"cal_delta": 0.0, "total_samples": 0},
+            "decision": {"action": "rewrite_step", "red_claim_ids": [], "reason": "empty_claim_map"},
+            "claims": [],
+            "pcae": {"e1_numeric_contradictions": [], "e2_duplicate_claims": [], "e3_source_conflicts": [], "e4_critic_additions": []},
+            "error": "Claim-map contains 0 claims — step output has no GroundedClaims",
         }
 
     assessment = _load_json(assessment_path)

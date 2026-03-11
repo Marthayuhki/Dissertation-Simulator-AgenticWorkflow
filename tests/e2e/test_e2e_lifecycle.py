@@ -20,7 +20,7 @@ class TestInit:
         sot = read_sot(proj)
         assert sot["status"] == "running"
         assert sot["current_step"] == 0
-        assert sot["total_steps"] == 210
+        assert sot["total_steps"] == 211
 
     def test_init_creates_checklist(self, tmp_path):
         proj = tmp_path / "thesis-output" / "fresh"

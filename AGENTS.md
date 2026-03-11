@@ -1438,11 +1438,11 @@ AGENTS.md의 절대 기준이 변경되면, 모든 Spoke 파일의 인라인 복
 
 ### 10.1 개요
 
-210-step 박사 논문 연구 시뮬레이션 워크플로우. AgenticWorkflow의 DNA 유전 철학을 실증하는 최초의 대규모 자식 시스템이다.
+211-step 박사 논문 연구 시뮬레이션 워크플로우. AgenticWorkflow의 DNA 유전 철학을 실증하는 최초의 대규모 자식 시스템이다.
 
-- **Phase 0** (Step 1-104): Literature Review — 5 Wave, 4 Gate
-- **Phase 1** (Step 105-140): Research Design — 1 Gate, HITL-3/4
-- **Phase 2** (Step 141-210): Writing & Publication — HITL-5~8
+- **Phase 0** (Step 1-120): Init + Literature Review — 5 Wave, 3 Gate, SRCS Full, HITL-1/2
+- **Phase 2** (Step 121-140): Research Design — HITL-3/4
+- **Phase 3-6** (Step 141-211): Writing + Publication + Finalization + Translation — HITL-5~8
 - **48개 전문 에이전트**: 문헌 검색·분석·연구 설계·작성·출판
 - **논문 SOT**: `session.json` (이 프로젝트의 유일한 활성 SOT. `state.yaml`은 workflow-generator가 생성하는 자식 시스템의 런타임 SOT이며, 부모 repo에는 존재하지 않음)
 
@@ -1471,8 +1471,9 @@ AGENTS.md의 절대 기준이 변경되면, 모든 Spoke 파일의 인라인 복
 | Gate (5개) | Wave 간 교차 검증. Claim 품질 임계값 미달 시 진행 차단 | L1 Verification Gate |
 | HITL (9개) | 인간 승인 필수 지점. 연구 방향·방법론·최종 산출물 | L2 Adversarial Review |
 | 3-tier Fallback | Team → Sub-agent → Direct 실행 | P2 전문성 기반 위임 |
-| Step Consolidation | 동일 에이전트 연속 Step을 단일 호출로 통합 (210 step → 17 Orchestrator invocations). `query_step.py`의 3개 P1 함수로 결정론적 제어 | P1 데이터 정제 |
-| Consolidation Fallback | 통합 그룹 3회 실패 → 개별 Step 분리 재시도 | Bounded Retry Escalation |
+| Step Consolidation | 동일 에이전트 연속 Step을 단일 호출로 통합 (211 step → 17 Orchestrator invocations). `query_step.py`의 3개 P1 함수로 결정론적 제어 | P1 데이터 정제 |
+| Consolidation Fallback | 통합 그룹 3회 실패 → `split_consolidated_group()` P1 binary split → 개별 Step 분리 재시도 | Bounded Retry Escalation |
+| Hallucination Containment | V-1~V-4 취약점 + GAP-1~GAP-6을 P1 결정론적 스크립트로 봉쇄 (ADR-071). `verify_step_output.py` + `determine_dialogue_outcome.py` + `split_consolidated_group()` | P1 Sandwich 확장 |
 | Checkpoint | SOT + 체크리스트 스냅샷 저장·복원 | Context Preservation |
 
 ### 10.4 핵심 인프라
@@ -1482,14 +1483,16 @@ AGENTS.md의 절대 기준이 변경되면, 모든 Spoke 파일의 인라인 복
 | `checklist_manager.py` | 논문 SOT CRUD (init/advance/gate/HITL/checkpoint/validate) |
 | `query_workflow.py` | 논문 관측성 (dashboard/weakest-step/blocked/retry/error-trends) |
 | `validate_grounded_claim.py` | GroundedClaim ID·스키마 검증 |
-| `fallback_controller.py` | 3-tier Fallback 제어 |
+| `fallback_controller.py` | 3-tier Fallback 제어 + `split_consolidated_group()` P1 결정론적 그룹 분할 (V-4 제거) |
+| `verify_step_output.py` | **Step Output Verification** — VO-1~VO-5 결정론적 산출물 검증. V-1, GAP-3, GAP-4 제거 (ADR-071) |
+| `determine_dialogue_outcome.py` | **Dialogue Outcome Decision** — P1 결정론적 대화 루프 종료 판단. V-2 제거 (ADR-071) |
 | `guard_sot_write.py` | 논문 SOT 쓰기 보호 (병렬 에이전트 충돌 방지) |
 | `compute_srcs_scores.py` | SRCS 4축 결정론적 점수 계산 |
 | `validate_wave_gate.py` | Wave/Gate 교차 검증 실행·기록 |
 | `validate_step_sequence.py` | 스텝 순서·의존성 검증 |
 | `validate_thesis_output.py` | 산출물 파일 존재·크기·TO5 heading·TO6 prefix 검증 (consolidated mode 지원) |
 | `validate_srcs_threshold.py` | SRCS 75점 임계값 검증 |
-| `query_step.py` | Step Execution Registry — H-1~H-4 결정론적 step→agent/tier/critic/pCCS 매핑, 통합 prompt 생성, 다음 실행 Step 계산 |
+| `query_step.py` | Step Execution Registry — H-1~H-7 결정론적 step→agent/tier/critic/pCCS 매핑, 통합 prompt 생성, 다음 실행 Step 계산, invocation plan (ADR-064) |
 | `validate_task_completion.py` | 태스크 완료 검증 (CLI-only, Orchestrator 호출) |
 | `teammate_health_check.py` | 에이전트 팀 건강 점검 |
 | `verify_translation_terms.py` | T10-T12 번역 콘텐츠 보존 검증 (P1) |

@@ -41,23 +41,23 @@ def create_sot(tmpdir, outputs=None, gates=None, hitl_checkpoints=None):
 class TestPhaseRanges(unittest.TestCase):
     """Test phase range constants (imported from checklist_manager)."""
 
-    def test_16_phases_defined(self):
-        self.assertEqual(len(PHASE_RANGES), 17)
+    def test_19_phases_defined(self):
+        self.assertEqual(len(PHASE_RANGES), 19)
 
     def test_phases_start_at_1(self):
         min_start = min(start for start, _ in PHASE_RANGES.values())
         self.assertEqual(min_start, 1)
 
-    def test_phases_end_at_210(self):
+    def test_phases_end_at_211(self):
         max_end = max(end for _, end in PHASE_RANGES.values())
-        self.assertEqual(max_end, 210)
+        self.assertEqual(max_end, 211)
 
     def test_no_gaps_in_coverage(self):
         all_steps = set()
         for start, end in PHASE_RANGES.values():
             for s in range(start, end + 1):
                 all_steps.add(s)
-        for s in range(1, 181):
+        for s in range(1, 212):
             self.assertIn(s, all_steps, f"Step {s} not in any phase")
 
     def test_phase_entry_steps_derived(self):
@@ -141,39 +141,39 @@ class TestValidateStep(unittest.TestCase):
             self.assertTrue(result["can_proceed"])
 
     def test_gate_prerequisite_block(self):
-        """Wave-2 (step 55) requires gate-1. Without it, should block."""
+        """Wave-2 (step 59) requires gate-1. Without it, should block."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = {f"step-{i}": "done" for i in range(1, 55)}
+            outputs = {f"step-{i}": "done" for i in range(1, 59)}
             create_sot(tmpdir, outputs=outputs)
-            result = validate_step(tmpdir, 55)
+            result = validate_step(tmpdir, 59)
             self.assertFalse(result["can_proceed"])
             self.assertTrue(any("gate" in e.lower() for e in result["errors"]))
 
     def test_gate_prerequisite_pass(self):
-        """Wave-2 (step 55) with gate-1 passed should proceed."""
+        """Wave-2 (step 59) with gate-1 passed should proceed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = {f"step-{i}": "done" for i in range(1, 55)}
+            outputs = {f"step-{i}": "done" for i in range(1, 59)}
             gates = {"gate-1": {"status": "pass"}}
             create_sot(tmpdir, outputs=outputs, gates=gates)
-            result = validate_step(tmpdir, 55)
+            result = validate_step(tmpdir, 59)
             self.assertTrue(result["can_proceed"])
 
     def test_hitl_prerequisite_block(self):
-        """Phase-2 (step 105) requires hitl-2. Without it, should block."""
+        """Phase-2 (step 121) requires hitl-2. Without it, should block."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = {f"step-{i}": "done" for i in range(1, 105)}
+            outputs = {f"step-{i}": "done" for i in range(1, 121)}
             create_sot(tmpdir, outputs=outputs)
-            result = validate_step(tmpdir, 105)
+            result = validate_step(tmpdir, 121)
             self.assertFalse(result["can_proceed"])
             self.assertTrue(any("hitl" in e.lower() for e in result["errors"]))
 
     def test_hitl_prerequisite_pass(self):
-        """Phase-2 (step 105) with hitl-2 completed should proceed."""
+        """Phase-2 (step 121) with hitl-2 completed should proceed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = {f"step-{i}": "done" for i in range(1, 105)}
+            outputs = {f"step-{i}": "done" for i in range(1, 121)}
             hitl = {"hitl-2": {"status": "completed"}}
             create_sot(tmpdir, outputs=outputs, hitl_checkpoints=hitl)
-            result = validate_step(tmpdir, 105)
+            result = validate_step(tmpdir, 121)
             self.assertTrue(result["can_proceed"])
 
     def test_already_completed_warning(self):

@@ -199,10 +199,54 @@ _PHASE5_AGENTS: list[tuple[int, int, str, str]] = [
     (180, 180, "_orchestrator", "Archive project"),
 ]
 
-# Phase 6: Translation (steps 181-210)
+# Phase 6: Translation (steps 181-210) + Export (step 211)
 _PHASE6_AGENTS: list[tuple[int, int, str, str]] = [
     (181, 210, "translator", "Translation step"),
+    (211, 211, "_orchestrator", "Generate consolidated Korean thesis DOCX"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Output path overrides — steps with non-standard output locations
+# ---------------------------------------------------------------------------
+
+# Steps whose output_path and output_dir don't follow phase-based conventions.
+# Checked BEFORE the phase-based if/else chain in _get_output_pattern/_get_output_dir.
+_OUTPUT_OVERRIDES: dict[int, dict[str, str]] = {
+    211: {
+        "pattern": "deliverables/consolidated-thesis-ko.docx",
+        "dir": "deliverables",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Execution commands — P1 deterministic bash commands for automated steps
+# ---------------------------------------------------------------------------
+
+# Steps with a pre-defined execution command. The orchestrator runs this
+# command verbatim via Bash instead of dispatching to a sub-agent.
+# Template variable {project_dir} is resolved at CLI output time.
+_EXECUTION_COMMANDS: dict[int, tuple[str, str]] = {
+    # (script_filename, arguments_template)
+    211: ("merge_ko_to_docx.py", "--project-dir {project_dir} --json"),
+}
+
+
+def _get_execution_command(step: int) -> str | None:
+    """Return fully resolved execution command for a step, or None.
+
+    Resolves the script path relative to this file's directory.
+    The {project_dir} template variable remains for CLI-level resolution.
+    """
+    entry = _EXECUTION_COMMANDS.get(step)
+    if entry is None:
+        return None
+    script_name, args_template = entry
+    import os
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    script_path = os.path.join(scripts_dir, script_name)
+    return f"{sys.executable} {script_path} {args_template}"
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +439,7 @@ def _get_phase(step: int) -> str:
         return "phase_4_publication"
     if step <= 180:
         return "phase_5_finalization"
-    if step <= 210:
+    if step <= 211:
         return "phase_6_translation"
     return "unknown"
 
@@ -461,6 +505,9 @@ _TRANSLATION_STEPS.update(range(181, 210 + 1))
 
 def _get_output_pattern(step: int, phase: str) -> str:
     """Return expected output file path pattern for a step."""
+    override = _OUTPUT_OVERRIDES.get(step)
+    if override:
+        return override["pattern"]
     wave = _get_wave(step)
     if wave is not None:
         return f"wave-results/wave-{wave}/step-{step:03d}-*.md"
@@ -484,6 +531,9 @@ def _get_output_dir(step: int, phase: str) -> str:
 
     Used by consolidation to construct consolidated output file paths.
     """
+    override = _OUTPUT_OVERRIDES.get(step)
+    if override:
+        return override.get("dir", "")
     wave = _get_wave(step)
     if wave is not None:
         return f"wave-results/wave-{wave}"
@@ -598,7 +648,7 @@ _INVOCATION_PLAN: list[tuple[int, int, str]] = [
     (165, 172, "Phase 4: Publication + HITL-8"),
     (173, 180, "Phase 5: Finalization"),
     (181, 195, "Phase 6: Translation Batch 1"),
-    (196, 210, "Phase 6: Translation Batch 2"),
+    (196, 211, "Phase 6: Translation Batch 2 + Export"),
 ]
 
 
@@ -645,27 +695,38 @@ def query_step(step: int, research_type: str = "undecided") -> dict[str, Any]:
     """Query execution parameters for a given step.
 
     Args:
-        step: Step number (1-210)
+        step: Step number (1-211)
         research_type: "quantitative", "qualitative", "mixed", or "undecided"
 
     Returns:
         dict with all deterministic execution parameters.
     """
-    if step < 1 or step > 210:
-        return {"error": f"Step {step} out of range [1, 210]"}
+    if step < 1 or step > 211:
+        return {"error": f"Step {step} out of range [1, 211]"}
 
     # Build the full agent list based on research type
     all_ranges: list[tuple[int, int, str, str]] = list(_RANGE_AGENTS)
 
     # Add Phase 2 type-specific agents
+    # Guard: Phase 2 steps (121-140) MUST have a decided research type.
+    # "undecided" is only allowed for non-Phase-2 queries.
     if research_type == "quantitative":
         all_ranges.extend(_PHASE2_QUANT_AGENTS)
     elif research_type == "qualitative":
         all_ranges.extend(_PHASE2_QUAL_AGENTS)
     elif research_type == "mixed":
         all_ranges.extend(_PHASE2_MIXED_AGENTS)
+    elif 121 <= step <= 140:
+        # Phase 2 step with undecided type — this is an error.
+        # HITL-3 must set research_type before Phase 2 execution.
+        return {
+            "error": f"Step {step} is in Phase 2 (121-140) but research_type "
+                     f"is '{research_type}'. HITL-3 must set research_type "
+                     f"before Phase 2 execution.",
+            "step": step,
+        }
     else:
-        # Default to quantitative for "undecided" (most common fallback)
+        # Non-Phase-2 step with undecided type — safe to default
         all_ranges.extend(_PHASE2_QUANT_AGENTS)
 
     all_ranges.extend(_PHASE2_COMMON_TAIL)
@@ -736,6 +797,8 @@ def query_step(step: int, research_type: str = "undecided") -> dict[str, Any]:
         "consolidate_with": consol["consolidate_with"],
         "consolidated_output_filename": consol["consolidated_output_filename"],
         "min_output_bytes": consol["min_output_bytes"],
+        # Execution command (P1 deterministic bash command for automated steps)
+        "execution_command": _get_execution_command(step),
     }
 
 
@@ -772,9 +835,9 @@ def generate_consolidated_prompt(
         ValueError: If step range is invalid or doesn't match a consolidation group boundary.
     """
     # Input validation (P1 — prevent misuse that causes semantic mismatches)
-    if first_step < 1 or last_step > 210:
+    if first_step < 1 or last_step > 211:
         raise ValueError(
-            f"Step range [{first_step}, {last_step}] out of bounds [1, 210]"
+            f"Step range [{first_step}, {last_step}] out of bounds [1, 211]"
         )
     if first_step > last_step:
         raise ValueError(
@@ -789,15 +852,20 @@ def generate_consolidated_prompt(
 
     # Validate that [first_step, last_step] matches the actual consolidation group
     cw = info.get("consolidate_with", [first_step])
-    if len(cw) > 1:
-        expected_first = min(cw)
-        expected_last = max(cw)
-        if first_step != expected_first or last_step != expected_last:
-            raise ValueError(
-                f"Step range [{first_step}, {last_step}] does not match "
-                f"consolidation group boundary [{expected_first}, {expected_last}]. "
-                f"Use the exact group boundary from query_step()."
-            )
+    if len(cw) <= 1:
+        raise ValueError(
+            f"Step {first_step} is not part of a multi-step consolidation group "
+            f"(consolidate_with={cw}). Use --step {first_step} for single-step "
+            f"execution instead of --consolidated-prompt."
+        )
+    expected_first = min(cw)
+    expected_last = max(cw)
+    if first_step != expected_first or last_step != expected_last:
+        raise ValueError(
+            f"Step range [{first_step}, {last_step}] does not match "
+            f"consolidation group boundary [{expected_first}, {expected_last}]. "
+            f"Use the exact group boundary from query_step()."
+        )
 
     agent = info["agent"]
     output_file = info.get("consolidated_output_filename") or info["output_path"]
@@ -878,13 +946,13 @@ def get_next_execution_step(
     if current_step < 0:
         current_step = 0  # Treat negative as "nothing completed"
 
-    if current_step >= 210:
+    if current_step >= 211:
         return {
             "next_step": None,
             "reason": "workflow_completed",
             "consolidated_group": None,
             "agent": None,
-            "description": "All 210 steps completed",
+            "description": "All 211 steps completed",
         }
 
     candidate = current_step + 1
@@ -926,12 +994,17 @@ def get_next_execution_step(
 def list_agents() -> dict[str, list[int]]:
     """Return a mapping of agent_name → list of steps they handle.
 
-    Uses 'undecided' research type for the base mapping.
+    Uses 'quantitative' for Phase 2 steps (121-140) to enumerate all agents.
+    Non-Phase-2 steps use 'undecided' (which safely defaults to quantitative).
     """
     result: dict[str, list[int]] = {}
-    for step in range(1, 211):
-        info = query_step(step)
-        agent = info["agent"]
+    for step in range(1, 212):
+        # Phase 2 steps need explicit research_type to avoid GAP-6 error
+        rt = "quantitative" if 121 <= step <= 140 else "undecided"
+        info = query_step(step, rt)
+        agent = info.get("agent")
+        if not agent:
+            continue  # skip error entries
         if agent not in result:
             result[agent] = []
         result[agent].append(step)
@@ -952,7 +1025,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Step Execution Registry — deterministic step→execution mapping"
     )
-    parser.add_argument("--step", type=int, help="Step number to query (1-210)")
+    parser.add_argument("--step", type=int, help="Step number to query (1-211)")
     parser.add_argument("--project-dir", help="Project directory (reads research_type from SOT)")
     parser.add_argument("--research-type",
                         choices=["quantitative", "qualitative", "mixed", "undecided"],
@@ -1054,7 +1127,7 @@ def main() -> int:
         else:
             ns = result["next_step"]
             if ns is None:
-                print("Workflow completed (all 210 steps done)")
+                print("Workflow completed (all 211 steps done)")
             else:
                 print(f"Next step: {ns} ({result['description']})")
                 print(f"  Agent: {result['agent']}")
@@ -1097,6 +1170,12 @@ def main() -> int:
     if "error" in result:
         print(f"ERROR: {result['error']}", file=sys.stderr)
         return 1
+
+    # Resolve {project_dir} in execution_command when --project-dir is available
+    if result.get("execution_command") and args.project_dir:
+        result["execution_command"] = result["execution_command"].replace(
+            "{project_dir}", args.project_dir,
+        )
 
     if args.field:
         val = result.get(args.field)

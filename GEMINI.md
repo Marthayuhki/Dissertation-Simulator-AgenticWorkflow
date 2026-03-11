@@ -67,7 +67,7 @@
 
 ## Doctoral Thesis Workflow 호환
 
-AgenticWorkflow에는 210-step 박사 논문 연구 시뮬레이션 워크플로우가 포함된다.
+AgenticWorkflow에는 211-step 박사 논문 연구 시뮬레이션 워크플로우가 포함된다.
 
 | AgenticWorkflow 개념 | Gemini CLI 대응 |
 |---------------------|----------------|
@@ -77,7 +77,8 @@ AgenticWorkflow에는 210-step 박사 논문 연구 시뮬레이션 워크플로
 | 26개 논문 Slash Commands | `/thesis-init` 등은 Claude Code 전용. Gemini에서는 `checklist_manager.py --init` 등 CLI 직접 호출 |
 | GroundedClaim 스키마 | `validate_grounded_claim.py`로 claim ID 검증. Gemini 출력도 동일 스키마 준수 필수 |
 | Step Consolidation | 동일 에이전트 연속 Step을 단일 호출로 통합 (210→17 invocations). `query_step.py --consolidated-prompt`, `--next-step`, `--invocation-plan` CLI로 제어. Gemini에서는 해당 CLI를 직접 호출하여 통합 프롬프트·다음 Step을 결정론적으로 획득 |
-| Consolidation Fallback | 통합 그룹 3회 실패 시 개별 Step으로 분리 재시도. `checklist_manager.py --advance-group` CLI로 원자적 SOT 갱신 |
+| Consolidation Fallback | 통합 그룹 3회 실패 시 `fallback_controller.py --split-group` P1 결정론적 분할 → 개별 Step 재시도. `checklist_manager.py --advance-group` CLI로 원자적 SOT 갱신 |
+| Hallucination Containment | V-1~V-4 취약점 + GAP-1~GAP-6 P1 결정론적 봉쇄 (ADR-071). `verify_step_output.py`(VO-1~VO-5 산출물 검증), `determine_dialogue_outcome.py`(대화 루프 종료 판단). Gemini에서도 CLI 직접 호출 가능 |
 | 3-tier Fallback | Team → Sub-agent → Direct. Gemini는 Direct 실행만 가능 |
 
 ## 컨텍스트 보존

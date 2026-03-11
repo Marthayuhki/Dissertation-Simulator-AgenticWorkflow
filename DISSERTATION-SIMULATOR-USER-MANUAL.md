@@ -33,7 +33,7 @@ claude
 
 초기화 시 다음이 생성됩니다:
 - `thesis-output/[project-name]/session.json` — 논문 SOT
-- `thesis-output/[project-name]/todo-checklist.md` — 210-step 체크리스트
+- `thesis-output/[project-name]/todo-checklist.md` — 211-step 체크리스트
 - `thesis-output/[project-name]/research-synthesis.md` — 연구 합성 파일
 - `thesis-output/[project-name]/wave-results/` — Wave별 산출물 디렉터리
 - `thesis-output/[project-name]/checkpoints/` — 체크포인트 디렉터리
@@ -301,6 +301,22 @@ python .claude/hooks/scripts/validate_skill_output.py \
 python .claude/hooks/scripts/run_pccs_pipeline.py \
   --step-output thesis-output/my-thesis/wave-results/wave-1/literature-search.md \
   --project-dir thesis-output/my-thesis --step 40
+
+# Step 산출물 검증 (VO-1~VO-5 — Hallucination Containment)
+python .claude/hooks/scripts/verify_step_output.py \
+  --step 42 --project-dir thesis-output/my-thesis
+
+# Phase 2 step은 연구 유형 명시 필요
+python .claude/hooks/scripts/verify_step_output.py \
+  --step 125 --project-dir thesis-output/my-thesis --research-type quantitative
+
+# Dialogue 루프 종료 판단 (P1 결정론적)
+python .claude/hooks/scripts/determine_dialogue_outcome.py \
+  --step 5 --round 2 --max-rounds 3 --project-dir thesis-output/my-thesis
+
+# 통합 그룹 분할 (Consolidation Fallback)
+python .claude/hooks/scripts/fallback_controller.py \
+  --project-dir thesis-output/my-thesis --split-group --group-steps "39,40,41,42"
 ```
 
 ---
@@ -310,7 +326,7 @@ python .claude/hooks/scripts/run_pccs_pipeline.py \
 ```
 thesis-output/my-thesis/
 ├── session.json                  ← 논문 SOT
-├── todo-checklist.md             ← 210-step 체크리스트
+├── todo-checklist.md             ← 211-step 체크리스트
 ├── research-synthesis.md         ← 연구 합성 (3000-4000 단어)
 ├── wave-results/                 ← Wave별 산출물 (통합 모드)
 │   ├── wave-1/                   ← 기초 문헌 검색 결과

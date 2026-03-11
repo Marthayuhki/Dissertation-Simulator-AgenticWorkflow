@@ -96,11 +96,11 @@ def advanced_project(thesis_project):
 
 @pytest.fixture
 def gated_project(thesis_project):
-    """A project with gate-1 passed and advanced to wave-2 boundary."""
+    """A project with gate-1 passed and advanced to gate-1 boundary (step 58)."""
     proj, _ = thesis_project
     import checklist_manager as cm
-    # Advance to end of wave-1
-    cm.advance_step(proj, 54, force=True)
+    # Advance through wave-1 and gate-1 steps
+    cm.advance_step(proj, 58, force=True)
     # Pass gate-1
     cm.record_gate_result(proj, "gate-1", "pass")
     sot = read_sot(proj)

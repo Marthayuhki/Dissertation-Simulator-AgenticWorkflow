@@ -247,21 +247,24 @@ class TestStepAdvancement(unittest.TestCase):
             cm.advance_step(self.project_dir, 999)
 
     def test_dependency_wave2_needs_gate1(self):
-        """Wave 2 requires gate-1 to pass."""
-        # Advance to wave-2 range without passing gate-1
+        """Wave 2 (step 59+) requires gate-1 to pass."""
+        # Advance through wave-1, then through gate-1 range
         cm.advance_step(self.project_dir, 54)  # end of wave-1
+        cm.advance_step(self.project_dir, 58)  # end of gate-1 (wave-1 dep met)
+        # Check step 59 (wave-2 start) without gate-1 pass recorded
         unmet = cm.check_step_dependencies(
-            cm.read_thesis_sot(self.project_dir), 55  # start of wave-2
+            cm.read_thesis_sot(self.project_dir), 59  # start of wave-2
         )
         self.assertTrue(len(unmet) > 0)
         self.assertTrue(any("gate-1" in u for u in unmet))
 
     def test_dependency_met_after_gate_pass(self):
         """After gate passes, dependency is met."""
-        cm.advance_step(self.project_dir, 54)
+        cm.advance_step(self.project_dir, 54)  # end of wave-1
+        cm.advance_step(self.project_dir, 58)  # end of gate-1
         cm.record_gate_result(self.project_dir, "gate-1", "pass")
         unmet = cm.check_step_dependencies(
-            cm.read_thesis_sot(self.project_dir), 55
+            cm.read_thesis_sot(self.project_dir), 59
         )
         # Only phase dependency might remain
         gate_unmet = [u for u in unmet if "gate-1" in u]
@@ -387,7 +390,7 @@ class TestCheckpointManagement(unittest.TestCase):
         cm.advance_step(self.project_dir, 50)
         cm.save_checkpoint(self.project_dir, "mid-point")
 
-        cm.advance_step(self.project_dir, 100)
+        cm.advance_step(self.project_dir, 100, force=True)
         sot = cm.read_thesis_sot(self.project_dir)
         self.assertEqual(sot["current_step"], 100)
 
@@ -440,8 +443,11 @@ class TestPhaseMapping(unittest.TestCase):
         self.assertEqual(cm.get_phase_for_step(39), "wave-1")
         self.assertEqual(cm.get_phase_for_step(54), "wave-1")
 
+    def test_gate_3(self):
+        self.assertEqual(cm.get_phase_for_step(95), "gate-3")
+
     def test_wave_5(self):
-        self.assertEqual(cm.get_phase_for_step(95), "wave-5")
+        self.assertEqual(cm.get_phase_for_step(111), "wave-5")
 
     def test_out_of_range(self):
         self.assertIsNone(cm.get_phase_for_step(999))
@@ -475,12 +481,12 @@ class TestConstants(unittest.TestCase):
                 all_steps.add(s)
 
     def test_phase_ranges_contiguous(self):
-        """Phase ranges should cover steps 1 through 210."""
+        """Phase ranges should cover steps 1 through 211."""
         all_steps = set()
         for _, (start, end) in cm.PHASE_RANGES.items():
             all_steps.update(range(start, end + 1))
         self.assertEqual(min(all_steps), 1)
-        self.assertEqual(max(all_steps), 210)
+        self.assertEqual(max(all_steps), 211)
 
 
 class TestCLIRecordGate(unittest.TestCase):

@@ -98,46 +98,46 @@ class TestDependencyEnforcement:
     def test_wave2_blocked_without_gate1(self, thesis_project):
         import checklist_manager as cm
         proj, _ = thesis_project
-        # Jump to end of wave-1 with force
-        cm.advance_step(proj, 54, force=True)
-        # Try to enter wave-2 (step 55) WITHOUT gate-1 pass
+        # Jump to end of gate-1 (step 58) with force
+        cm.advance_step(proj, 58, force=True)
+        # Try to enter wave-2 (step 59) WITHOUT gate-1 pass
         with pytest.raises(ValueError, match="(?i)gate.*gate-1"):
-            cm.advance_step(proj, 55)
+            cm.advance_step(proj, 59)
 
     def test_wave2_allowed_with_gate1(self, gated_project):
         import checklist_manager as cm
         proj, _ = gated_project
-        # gate-1 already passed — wave-2 should be accessible
-        cm.advance_step(proj, 55)
-        assert read_sot(proj)["current_step"] == 55
+        # gate-1 already passed — wave-2 (step 59) should be accessible
+        cm.advance_step(proj, 59)
+        assert read_sot(proj)["current_step"] == 59
 
     def test_wave3_blocked_without_gate2(self, gated_project):
         import checklist_manager as cm
         proj, _ = gated_project
-        # Jump to end of wave-2 with force
-        cm.advance_step(proj, 70, force=True)
-        # Try to enter wave-3 (step 71) WITHOUT gate-2 pass
+        # Jump to end of wave-2 (step 74) + gate-2 (step 78) with force
+        cm.advance_step(proj, 78, force=True)
+        # Try to enter wave-3 (step 79) WITHOUT gate-2 pass
         with pytest.raises(ValueError, match="(?i)gate.*gate-2"):
-            cm.advance_step(proj, 71)
+            cm.advance_step(proj, 79)
 
     def test_phase2_blocked_without_hitl2(self, thesis_project):
         import checklist_manager as cm
         proj, _ = thesis_project
-        # Jump to end of hitl-2 range with force
-        cm.advance_step(proj, 104, force=True)
-        # Try to enter phase-2 (step 105) WITHOUT hitl-2
+        # Jump to end of hitl-2 range (step 120) with force
+        cm.advance_step(proj, 120, force=True)
+        # Try to enter phase-2 (step 121) WITHOUT hitl-2
         with pytest.raises(ValueError, match="(?i)hitl.*hitl-2"):
-            cm.advance_step(proj, 105)
+            cm.advance_step(proj, 121)
 
     def test_phase2_allowed_with_hitl2(self, thesis_project):
         import checklist_manager as cm
         proj, _ = thesis_project
-        # Force to step 104, record HITL-2
-        cm.advance_step(proj, 104, force=True)
+        # Force to step 120, record HITL-2
+        cm.advance_step(proj, 120, force=True)
         cm.record_hitl(proj, "hitl-2")
         # Should now work
-        cm.advance_step(proj, 105)
-        assert read_sot(proj)["current_step"] == 105
+        cm.advance_step(proj, 121)
+        assert read_sot(proj)["current_step"] == 121
 
     def test_force_bypasses_all_deps(self, thesis_project):
         import checklist_manager as cm

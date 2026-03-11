@@ -37,20 +37,27 @@ class TestQueryStepBasic(unittest.TestCase):
         result = query_step(0)
         self.assertIn("error", result)
 
-    def test_invalid_step_211(self):
-        result = query_step(211)
+    def test_invalid_step_212(self):
+        result = query_step(212)
         self.assertIn("error", result)
 
     def test_all_steps_have_agent(self):
-        """Every step 1-210 must return a non-empty agent."""
-        for step in range(1, 211):
-            result = query_step(step)
+        """Every step 1-211 must return a non-empty agent.
+
+        Phase 2 steps (121-140) need explicit research_type (GAP-6 fix).
+        """
+        for step in range(1, 212):
+            rt = "quantitative" if 121 <= step <= 140 else "undecided"
+            result = query_step(step, rt)
             self.assertNotIn("error", result, f"Step {step} returned error")
             self.assertIn("agent", result, f"Step {step} missing 'agent' key")
             self.assertTrue(result["agent"], f"Step {step} has empty agent")
 
     def test_all_steps_have_required_fields(self):
-        """Every step must have all required output fields."""
+        """Every step must have all required output fields.
+
+        Phase 2 steps (121-140) need explicit research_type (GAP-6 fix).
+        """
         required = {
             "step", "agent", "description", "tier", "phase",
             "wave", "critic", "dialogue_domain", "dialogue",
@@ -58,9 +65,11 @@ class TestQueryStepBasic(unittest.TestCase):
             "has_grounded_claims", "output_path",
             "gate_before", "gate_after", "hitl",
             "hitl_required", "translation_required",
+            "execution_command",
         }
-        for step in range(1, 211):
-            result = query_step(step)
+        for step in range(1, 212):
+            rt = "quantitative" if 121 <= step <= 140 else "undecided"
+            result = query_step(step, rt)
             missing = required - set(result.keys())
             self.assertEqual(missing, set(), f"Step {step} missing fields: {missing}")
 
@@ -160,9 +169,11 @@ class TestResearchTypeVariants(unittest.TestCase):
         result = query_step(123, "mixed")
         self.assertEqual(result["agent"], "mixed-methods-designer")
 
-    def test_undecided_defaults_to_quantitative(self):
+    def test_undecided_phase2_returns_error(self):
+        """GAP-6: Phase 2 steps with undecided research_type return error."""
         result = query_step(123, "undecided")
-        self.assertEqual(result["agent"], "quantitative-designer")
+        self.assertIn("error", result)
+        self.assertIn("HITL-3", result["error"])
 
     def test_quant_sampling(self):
         result = query_step(125, "quantitative")
@@ -497,13 +508,13 @@ class TestGetInvocationPlan(unittest.TestCase):
             self.assertIn("status", entry)
             self.assertIn("total", entry)
 
-    def test_covers_all_210_steps(self):
-        """Invocation plan must cover steps 1-210 with no gaps."""
+    def test_covers_all_211_steps(self):
+        """Invocation plan must cover steps 1-211 with no gaps."""
         plan = get_invocation_plan(0)
         # First entry starts at 1
         self.assertEqual(plan[0]["start"], 1)
-        # Last entry ends at 210
-        self.assertEqual(plan[-1]["end"], 210)
+        # Last entry ends at 211
+        self.assertEqual(plan[-1]["end"], 211)
         # No gaps between entries
         for i in range(1, len(plan)):
             self.assertEqual(plan[i]["start"], plan[i - 1]["end"] + 1)
@@ -513,8 +524,8 @@ class TestGetInvocationPlan(unittest.TestCase):
         for entry in plan:
             self.assertEqual(entry["status"], "pending")
 
-    def test_step_210_all_completed(self):
-        plan = get_invocation_plan(210)
+    def test_step_211_all_completed(self):
+        plan = get_invocation_plan(211)
         for entry in plan:
             self.assertEqual(entry["status"], "completed")
 
@@ -550,14 +561,14 @@ class TestGetNextExecutionStep(unittest.TestCase):
         self.assertEqual(result["next_step"], 1)
         self.assertEqual(result["reason"], "normal")
 
-    def test_step_210_completed(self):
-        result = get_next_execution_step(210)
+    def test_step_211_completed(self):
+        result = get_next_execution_step(211)
         self.assertIsNone(result["next_step"])
         self.assertEqual(result["reason"], "workflow_completed")
         self.assertIsNone(result["agent"])
 
-    def test_step_211_completed(self):
-        result = get_next_execution_step(211)
+    def test_step_212_completed(self):
+        result = get_next_execution_step(212)
         self.assertIsNone(result["next_step"])
         self.assertEqual(result["reason"], "workflow_completed")
 
@@ -684,7 +695,7 @@ class TestGenerateConsolidatedPrompt(unittest.TestCase):
 
     def test_step_out_of_range_high_raises(self):
         with self.assertRaises(ValueError):
-            generate_consolidated_prompt(208, 211, "test")
+            generate_consolidated_prompt(209, 212, "test")
 
     def test_subset_of_group_raises(self):
         """F-2: Calling with subset (40,42) when group is (39,42) must raise."""
@@ -695,6 +706,17 @@ class TestGenerateConsolidatedPrompt(unittest.TestCase):
         """F-2: Calling with (39,41) when group is (39,42) must raise."""
         with self.assertRaises(ValueError):
             generate_consolidated_prompt(39, 41, "test")
+
+    def test_single_step_raises(self):
+        """F-2: Single-step groups (e.g. step 211) must not use consolidated prompt."""
+        with self.assertRaises(ValueError) as ctx:
+            generate_consolidated_prompt(211, 211, "test")
+        self.assertIn("not part of a multi-step consolidation group", str(ctx.exception))
+
+    def test_non_consolidatable_step_raises(self):
+        """F-2: Steps in _NO_CONSOLIDATE_AGENTS (translator) must reject."""
+        with self.assertRaises(ValueError):
+            generate_consolidated_prompt(181, 181, "test")
 
     def test_wave2_group(self):
         result = generate_consolidated_prompt(59, 62, "test topic")

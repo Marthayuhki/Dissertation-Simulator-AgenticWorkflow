@@ -101,7 +101,7 @@ AgenticWorkflow/
 │   │   ├── predict-failures.md      (/predict-failures — Predictive Debugging 전체 스캔)
 │   │   ├── self-improve.md          (/self-improve — KBSI 자기 개선 분석)
 │   │   └── thesis-*.md (26개)       (/thesis-init, /thesis-start, /thesis-status, /thesis-translate 등 — 논문 워크플로우)
-│   ├── hooks/scripts/               ← Hook + 검증 스크립트 (62개 프로덕션 + 2개 모듈 + 42개 테스트)
+│   ├── hooks/scripts/               ← Hook + 검증 스크립트 (66개 프로덕션 + 2개 모듈 + 45개 테스트)
 │   │   ├── context_guard.py         (통합 디스패처)
 │   │   ├── _context_lib.py          (공유 라이브러리 — 파싱·생성·검증·압축)
 │   │   ├── _claim_patterns.py       (Claim ID 정규식 SOT — 모든 스크립트 공유 모듈)
@@ -167,7 +167,9 @@ AgenticWorkflow/
 │   │   ├── self_improve_manager.py  (KBSI SOT 관리 — register/apply/reject/status/apply-to-agents-md/sync-claude-md/queue-change)
 │   │   ├── validate_self_improvement.py (SI-1~SI-6 insight 검증 — P1 결정론적)
 │   │   ├── validate_skill_output.py (SK-1~SK-5 스킬 산출물 구조 검증 — P1 결정론적, CLI 도구)
-│   │   └── _test_*.py (42개)        (유닛 테스트 — 각 프로덕션 스크립트 대응)
+│   │   ├── verify_step_output.py   (VO-1~VO-5 Step 산출물 검증 — P1 결정론적, 할루시네이션 방지)
+│   │   ├── determine_dialogue_outcome.py (대화 루프 탈출 결정 — P1 결정론적, 할루시네이션 방지)
+│   │   └── _test_*.py (45개)        (유닛 테스트 — 각 프로덕션 스크립트 대응)
 │   ├── context-snapshots/           ← 런타임 (gitignored)
 │   └── skills/
 │       ├── workflow-generator/      (워크플로우 설계·생성)
@@ -239,7 +241,7 @@ AgenticWorkflow/
 
 ### 논문 워크플로우 (Slash Commands)
 
-`/start` (스마트 라우터) → `/thesis-init` → `/thesis-start` → `/thesis-status` 등 26개 논문 전용 명령어. 210-step 박사 논문 시뮬레이션 워크플로우를 구동하며, Wave/Gate/HITL 아키텍처를 통해 품질을 보장한다. 논문 SOT는 `session.json` (시스템 SOT `state.yaml`과 독립).
+`/start` (스마트 라우터) → `/thesis-init` → `/thesis-start` → `/thesis-status` 등 27개 논문 전용 명령어. 211-step 박사 논문 시뮬레이션 워크플로우를 구동하며, Wave/Gate/HITL 아키텍처를 통해 품질을 보장한다. 논문 SOT는 `session.json` (시스템 SOT `state.yaml`과 독립).
 
 ## 설계 원칙
 

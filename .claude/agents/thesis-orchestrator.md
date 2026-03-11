@@ -166,7 +166,17 @@ If the sub-agent fails 3 times, escalate to Tier 3 via the Fallback Protocol.
 
 **E4. Execute (Tier 3 — Direct):**
 
-Perform the task directly using Read, Write, Grep, Bash tools. Log the degradation:
+**Check for P1 execution command** — `query_step.py` returns `execution_command` (string or null):
+- If `execution_command` is non-null: **run the command verbatim via Bash tool**. Do NOT modify, reconstruct, or interpret the command. Parse the JSON output for status/error. This is a P1 deterministic operation — the script handles everything autonomously.
+- If `execution_command` is null: perform the task directly using Read, Write, Grep, Bash tools.
+
+```
+query_step.py --step {N} --project-dir {dir} --json
+  → execution_command: non-null  → Run via Bash, parse JSON result
+  → execution_command: null      → Direct execution with Read/Write/Grep/Bash
+```
+
+If this is a fallback from Tier 2, log the degradation:
 ```bash
 python3 .claude/hooks/scripts/fallback_controller.py \
   --project-dir {dir} --record-fallback \
@@ -178,7 +188,17 @@ python3 .claude/hooks/scripts/fallback_controller.py \
    ```bash
    python3 .claude/hooks/scripts/checklist_manager.py --set-substep L0_antiskip --project-dir {dir} --step {N}
    ```
-1. Verify output file exists and is non-empty (L0 Anti-Skip)
+1. **P1 Output Verification** — Run `verify_step_output.py` (replaces LLM-based file check):
+   ```bash
+   python3 .claude/hooks/scripts/verify_step_output.py --step {N} --project-dir {dir} --research-type {research_type}
+   ```
+   - **If `valid: false`** → Do NOT advance. Fix the issue and re-run the step.
+   - VO-1: File exists + size ≥ min_output_bytes
+   - VO-2: Valid UTF-8
+   - VO-3: No placeholder content (TODO, FIXME, lorem ipsum, [insert], etc.)
+   - VO-4: Tier A steps → at least 1 GroundedClaim present
+   - VO-5: Claim prefix matches expected agent prefix
+   - **NEVER skip this check. NEVER manually override `valid: false`.**
 2. Record sub-step:
    ```bash
    python3 .claude/hooks/scripts/checklist_manager.py --set-substep L1_verification --project-dir {dir} --step {N}
@@ -298,11 +318,19 @@ python3 .claude/hooks/scripts/fallback_controller.py \
      python3 .claude/hooks/scripts/validate_dialogue_state.py --step {N} --round {K} --project-dir {dir}
      # 4. Research domain only — validate claim inheritance:
      python3 .claude/hooks/scripts/validate_claim_inheritance.py --step {N} --round {K} --project-dir {dir}
-     # 5. Record round result:
-     python3 .claude/hooks/scripts/checklist_manager.py --dialogue-round \
-       --project-dir {dir} --step {N} --round {K} --verdict {PASS|FAIL}
 
-   IF PASS → CONSENSUS:
+     # 5. P1 DECISION — determine_dialogue_outcome.py FIRST (decides verdict + outcome):
+     python3 .claude/hooks/scripts/determine_dialogue_outcome.py \
+       --step {N} --round {K} --project-dir {dir}
+     # Returns JSON: {"outcome": "consensus"|"continue_round"|"escalate", "verdicts": {"fc":"PASS","rv":"FAIL"}, ...}
+     # NEVER decide outcome manually. ALWAYS use this script's output.
+
+     # 6. Record round result AFTER P1 decision (use verdict from step 5):
+     #    Derive verdict: "PASS" if outcome=="consensus", else "FAIL"
+     python3 .claude/hooks/scripts/checklist_manager.py --dialogue-round \
+       --project-dir {dir} --step {N} --round {K} --verdict {PASS_or_FAIL_from_step_5}
+
+   IF outcome == "consensus":
      python3 .claude/hooks/scripts/checklist_manager.py --dialogue-end \
        --project-dir {dir} --step {N} --outcome consensus
      # Validate consensus:
@@ -311,7 +339,10 @@ python3 .claude/hooks/scripts/fallback_controller.py \
      Write dialogue-logs/step-{N}-summary.md (Outcome: consensus, Rounds Used: {K})
      Copy final critic report → review-logs/step-{N}-review.md
 
-   IF K == max_rounds AND STILL FAIL → ESCALATE:
+   IF outcome == "continue_round":
+     # Go back to PER ROUND K+1 — generator incorporates critic feedback
+
+   IF outcome == "escalate":
      python3 .claude/hooks/scripts/checklist_manager.py --dialogue-end \
        --project-dir {dir} --step {N} --outcome escalated
      Write dialogue-logs/step-{N}-summary.md (Outcome: escalated, Rounds Used: {K})
@@ -360,12 +391,17 @@ python3 .claude/hooks/scripts/fallback_controller.py \
    - **Substep tracking**: Use `--set-substep` with step `{first}` (not per-step). After `--advance-group`, substep is auto-cleared.
    - **Retry budget**: A consolidated group failure counts as ONE retry against the first step's budget.
    - **Consolidation Fallback Protocol** (when consolidated group fails 3 times):
-     1. Split the consolidated group back into individual steps.
-     2. Execute each step separately via normal E3 single-step path.
-     3. Each individual step gets its own retry budget (independent from group budget).
-     4. Record individual outputs via `--advance` (not `--advance-group`).
-     5. If an individual step also fails 3 times, escalate to Tier 3 via Fallback Protocol.
-     **DO NOT** deadlock on a failing consolidated group — always split and retry individually.
+     1. **P1 split** — Use `fallback_controller.py --split-group` (NEVER split manually):
+        ```bash
+        python3 .claude/hooks/scripts/fallback_controller.py --project-dir {dir} --step {first} \
+          --split-group --group-steps "{comma_separated_steps}"
+        ```
+        Returns `{"sub_groups": [[s1,s2],[s3,s4]], "count": 2}` — binary split algorithm.
+     2. Execute each sub-group via E3. If sub-group has >1 step, use consolidated path; if 1 step, use single-step path.
+     3. Each sub-group gets its own retry budget (independent from parent group).
+     4. Record outputs via `--advance-group` or `--advance` as appropriate.
+     5. If a sub-group also fails, split again recursively until individual steps.
+     **DO NOT** split groups manually. **DO NOT** deadlock — always split and retry.
 
 8. At HITL points: `checklist_manager.py --save-checkpoint --project-dir {dir} --checkpoint {name}`
 
@@ -435,7 +471,8 @@ logged in SOT via `checklist_manager.py --set-substep`.
 | 55-62 (Wave 4-5) | Tier 2 | Sequential synthesis — depends on prior outputs, review between steps |
 | 63-104 (Gates/HITL) | Tier 2 | Validation — Orchestrator must verify each output individually |
 | 105-160 (Phase 2-3) | Tier 2 | Design/writing — deep domain analysis requires full context per agent |
-| 161-210 (Phase 4) | Tier 2 | Publication — sequential dependencies between formatting steps |
+| 161-210 (Phase 4-6) | Tier 2 | Publication/Translation — sequential dependencies between formatting steps |
+| 211 (Export) | Tier 3 | DOCX export — P1 script via `execution_command`, no sub-agent needed |
 
 **Tier 1 exception**: May be used ONLY when ALL of the following are true:
 1. The step involves 3+ agents doing genuinely independent work (no shared dependencies)

@@ -145,10 +145,9 @@ SRCS_WEIGHTS = {
 SRCS_THRESHOLD = 75
 
 # Dependency groups for step validation.
-# NOTE: These are dependency enforcement groups, NOT 1:1 checklist sections.
-# Each group bundles steps that share the same prerequisite gate/hitl/phase.
-# Example: "wave-2" = (55,70) includes Gate 1 validation steps (55-58) + Wave 2 work (59-70),
-# because both require gate-1 to pass before entry.
+# Aligned 1:1 with _CHECKLIST_SECTIONS and query_step.py _RANGE_AGENTS.
+# Each group corresponds to a distinct workflow segment with clear boundaries.
+# Gates are separate groups (not bundled with waves) to prevent circular dependencies.
 # For user-facing section names, use get_checklist_section_for_step().
 DEPENDENCY_GROUPS = {
     "phase-0": (1, 8),
@@ -156,37 +155,47 @@ DEPENDENCY_GROUPS = {
     "phase-0-D": (15, 34),
     "hitl-1": (35, 38),
     "wave-1": (39, 54),
-    "wave-2": (55, 70),
-    "wave-3": (71, 86),
-    "wave-4": (87, 94),
-    "wave-5": (95, 98),
-    "hitl-2": (99, 104),
-    "phase-2": (105, 124),
-    "hitl-3-4": (125, 132),
-    "phase-3": (133, 156),
-    "hitl-5-6-7": (157, 168),
-    "phase-4": (169, 176),
-    "hitl-8": (177, 180),
-    "translation": (181, 210),
+    "gate-1": (55, 58),
+    "wave-2": (59, 74),
+    "gate-2": (75, 78),
+    "wave-3": (79, 94),
+    "gate-3": (95, 98),
+    "wave-4": (99, 106),
+    "srcs-full": (107, 110),
+    "wave-5": (111, 114),
+    "hitl-2": (115, 120),
+    "phase-2": (121, 140),
+    "phase-3": (141, 164),
+    "phase-4": (165, 172),
+    "phase-5": (173, 180),
+    "translation": (181, 211),
 }
 
 # Backward-compat alias (consumed by validate_step_sequence.py, tests)
 PHASE_RANGES = DEPENDENCY_GROUPS
 
-# Step dependencies — which phases/gates must be complete before starting
+# Step dependencies — which phases/gates must be complete before starting.
+# Each key is a DEPENDENCY_GROUPS name; value specifies its prerequisite.
+# Types: "gate" (gate must pass), "phase" (phase must complete), "hitl" (HITL must complete).
 STEP_DEPENDENCIES = {
-    "wave-2": {"gate": "gate-1", "phase": "wave-1"},
-    "wave-3": {"gate": "gate-2", "phase": "wave-2"},
-    "wave-4": {"gate": "gate-3", "phase": "wave-3"},
-    "wave-5": {"gate": "srcs-full", "phase": "wave-4"},
+    "gate-1": {"phase": "wave-1"},
+    "wave-2": {"gate": "gate-1"},
+    "gate-2": {"phase": "wave-2"},
+    "wave-3": {"gate": "gate-2"},
+    "gate-3": {"phase": "wave-3"},
+    "wave-4": {"gate": "gate-3"},
+    "srcs-full": {"phase": "wave-4"},
+    "wave-5": {"phase": "srcs-full"},
+    "hitl-2": {"phase": "wave-5"},
     "phase-2": {"hitl": "hitl-2"},
-    "phase-3": {"hitl": "hitl-3-4"},
-    "phase-4": {"hitl": "hitl-5-6-7"},
-    "translation": {"hitl": "hitl-8"},
+    "phase-3": {"phase": "phase-2"},
+    "phase-4": {"phase": "phase-3"},
+    "phase-5": {"phase": "phase-4"},
+    "translation": {"phase": "phase-5"},
 }
 
 # Translation step offset — each original step can have a -ko companion
-TRANSLATION_STEP_OFFSET = 180  # steps 181-210 are translation steps
+TRANSLATION_STEP_OFFSET = 180  # steps 181-210 are translation steps; step 211 is DOCX export (not translation)
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +457,7 @@ def create_initial_sot(
     research_type: str = "undecided",
     input_mode: str = "A",
     execution_mode: str = "interactive",
-    total_steps: int = 210,
+    total_steps: int = 211,
 ) -> dict:
     """Create initial thesis SOT structure."""
     now = datetime.now(timezone.utc).isoformat()
@@ -491,7 +500,7 @@ def create_initial_sot(
     }
 
 
-def generate_checklist(total_steps: int = 210) -> str:
+def generate_checklist(total_steps: int = 211) -> str:
     """Generate todo-checklist.md content with all workflow steps."""
     lines = [
         "# Doctoral Research Workflow Checklist",
@@ -718,7 +727,7 @@ def generate_checklist(total_steps: int = 210) -> str:
             "Generate author contribution statement",
             "Archive complete project",
         ]),
-        ("Phase 6: Translation (Steps 181-210)", [
+        ("Phase 6: Translation + Export (Steps 181-211)", [
             "@translator: Translate Chapter 1 Introduction",
             "@translator: Validate Chapter 1 translation (T1-T9)",
             "@translator: Translate Chapter 2 Literature Review",
@@ -749,6 +758,7 @@ def generate_checklist(total_steps: int = 210) -> str:
             "@translator: Validate complete Korean package",
             "@translator: Archive translation artifacts",
             "@translator: Generate translation completion report",
+            "Generate consolidated Korean thesis DOCX (deliverables/)",
         ]),
     ]
 
@@ -787,6 +797,7 @@ def init_project(project_dir: Path, project_name: str, **kwargs) -> dict:
         "fallback-logs",
         CHECKPOINTS_DIR,
         "user-resource",
+        "deliverables",
         "_temp",
     ]
     for subdir in subdirs:
@@ -819,14 +830,12 @@ def init_project(project_dir: Path, project_name: str, **kwargs) -> dict:
 def get_dependency_group(step: int) -> str | None:
     """Return the dependency group name for a given step number.
 
-    NOTE: Dependency groups are NOT 1:1 with checklist sections.
+    Dependency groups are aligned 1:1 with _CHECKLIST_SECTIONS.
     For user-facing section names, use get_checklist_section_for_step().
     """
     for group_name, (start, end) in DEPENDENCY_GROUPS.items():
         if start <= step <= end:
             return group_name
-    if TRANSLATION_STEP_OFFSET < step <= TRANSLATION_STEP_OFFSET + 30:
-        return "translation"
     return None
 
 
@@ -854,7 +863,7 @@ _CHECKLIST_SECTIONS = [
     ("Phase 3: Thesis Writing", 141, 164),
     ("Phase 4: Publication Strategy", 165, 172),
     ("Phase 5: Finalization", 173, 180),
-    ("Phase 6: Translation", 181, 210),
+    ("Phase 6: Translation + Export", 181, 211),
 ]
 
 
@@ -1229,7 +1238,7 @@ def advance_group(
             f"current_step is {current}, expected {first_step - 1}"
         )
 
-    total = sot.get("total_steps", 210)
+    total = sot.get("total_steps", 211)
     if last_step > total:
         raise ValueError(
             f"Last step {last_step} exceeds total_steps ({total})"

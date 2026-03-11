@@ -3479,7 +3479,8 @@ def _extract_gate_results_snapshot(project_dir):
     """R-12: Extract gate pass/fail snapshot for cross-session trend detection.
 
     Reads thesis SOT gates block and returns compact pass/fail dict.
-    Used by knowledge-index archival for multi-session gate trend analysis.
+    Includes completed/paused projects — their gate outcomes are valuable
+    for cross-session gate trend analysis and quality pattern detection.
 
     P1 Compliance: Deterministic JSON read, read-only.
     Returns: dict like {"gate-1": "pass", "gate-2": "fail"} or None.
@@ -3492,35 +3493,38 @@ def _extract_gate_results_snapshot(project_dir):
             sot_path = os.path.join(thesis_root, proj_name, "session.json")
             if not os.path.isfile(sot_path):
                 continue
-            with open(sot_path, "r", encoding="utf-8") as f:
-                sot = json.load(f)
-            status = sot.get("status", "")
-            if status in ("completed", "paused"):
+            try:
+                with open(sot_path, "r", encoding="utf-8") as f:
+                    sot = json.load(f)
+            except (json.JSONDecodeError, OSError):
                 continue
             gates = sot.get("gates", {})
             if not isinstance(gates, dict) or not gates:
-                return None
+                continue
             result = {}
             for gname, gdata in gates.items():
                 if isinstance(gdata, dict):
                     result[gname] = gdata.get("status", "pending")
                 else:
                     result[gname] = str(gdata)
-            return result if result else None
+            if result:
+                return result
+        return None
     except Exception:
         return None
 
 
 def _extract_thesis_step_at_archive(project_dir):
-    """CM-3: Read current_step from active thesis session.json at archive time.
+    """CM-3: Read current_step from thesis session.json at archive time.
 
-    Iterates thesis-output/{project_name}/session.json (same pattern as
-    _extract_thesis_continuity). Returns the step number of the first active
-    (non-completed, non-paused) thesis project found.
+    Iterates thesis-output/{project_name}/session.json. Returns the step
+    number of the most recent thesis project (by highest current_step).
+    Includes completed/paused projects — their final step is valuable for
+    RLM proximity scoring and cross-session context.
 
     P1 Compliance: Deterministic JSON extraction.
     SOT Compliance: Read-only access.
-    Non-blocking: returns None on any error or if no active thesis project.
+    Non-blocking: returns None on any error or if no thesis project.
     Returns: int (current_step) or None
     """
     if not project_dir:
@@ -3529,6 +3533,7 @@ def _extract_thesis_step_at_archive(project_dir):
         thesis_root = os.path.join(project_dir, "thesis-output")
         if not os.path.isdir(thesis_root):
             return None
+        best_step = None
         for proj_name in sorted(os.listdir(thesis_root)):
             sot_path = os.path.join(thesis_root, proj_name, "session.json")
             if not os.path.isfile(sot_path):
@@ -3540,13 +3545,10 @@ def _extract_thesis_step_at_archive(project_dir):
                 continue
             if not isinstance(data, dict):
                 continue
-            status = data.get("status", "")
-            if status in ("completed", "paused"):
-                continue
             step = data.get("current_step")
-            if isinstance(step, int):
-                return step
-        return None
+            if isinstance(step, int) and (best_step is None or step > best_step):
+                best_step = step
+        return best_step
     except Exception:
         return None
 
@@ -3812,10 +3814,11 @@ def extract_session_facts(session_id, trigger, project_dir, entries, token_estim
         facts["session_type"] = session_type
 
     # R-12: gate_results — cross-session gate pass/fail for trend detection
-    if thesis_continuity:
-        gate_snapshot = _extract_gate_results_snapshot(project_dir)
-        if gate_snapshot:
-            facts["gate_results"] = gate_snapshot
+    # Always extract gate results regardless of thesis_continuity status.
+    # Completed project gates are valuable for cross-session trend analysis.
+    gate_snapshot = _extract_gate_results_snapshot(project_dir)
+    if gate_snapshot:
+        facts["gate_results"] = gate_snapshot
 
     # CM-3: thesis_step — thesis current_step at archive time for proximity scoring.
     # Scalar int (not a range). Used by _retrieve_relevant_sessions() for step boost.
@@ -3831,14 +3834,48 @@ def extract_session_facts(session_id, trigger, project_dir, entries, token_estim
     if _thesis_step is not None:
         try:
             scripts_dir = os.path.join(os.path.dirname(__file__))
-            sys.path.insert(0, scripts_dir)
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
             from query_step import get_invocation_plan
             plan = get_invocation_plan(_thesis_step)
+            # Prefer in_progress invocation; fallback to last completed
             in_progress = [p for p in plan if p["status"] == "in_progress"]
             if in_progress:
                 facts["invocation_number"] = in_progress[0]["invocation"]
+            else:
+                completed = [p for p in plan if p["status"] == "completed"]
+                if completed:
+                    facts["invocation_number"] = completed[-1]["invocation"]
         except (ImportError, ModuleNotFoundError, AttributeError):
             pass  # Non-blocking: query_step.py may not exist or lack the function
+
+    # B-2: hitl_decisions — cross-session HITL approval/rejection history
+    # Enables Orchestrator to predict which checkpoints need human review.
+    try:
+        thesis_root = os.path.join(project_dir, "thesis-output")
+        if os.path.isdir(thesis_root):
+            for proj_name in sorted(os.listdir(thesis_root)):
+                sot_path = os.path.join(thesis_root, proj_name, "session.json")
+                if not os.path.isfile(sot_path):
+                    continue
+                try:
+                    with open(sot_path, "r", encoding="utf-8") as f:
+                        sot_data = json.load(f)
+                except (json.JSONDecodeError, OSError):
+                    continue
+                hitl_cp = sot_data.get("hitl_checkpoints", {})
+                if isinstance(hitl_cp, dict) and hitl_cp:
+                    hitl_summary = {}
+                    for hname, hdata in hitl_cp.items():
+                        if isinstance(hdata, dict):
+                            hitl_summary[hname] = hdata.get("status", "pending")
+                        else:
+                            hitl_summary[hname] = str(hdata)
+                    if hitl_summary:
+                        facts["hitl_decisions"] = hitl_summary
+                    break
+    except Exception:
+        pass  # Non-blocking
 
     # Mark ETERNAL fields for archival protection
     facts["_eternal_fields"] = ["team_summaries", "diagnosis_patterns", "design_decisions"]

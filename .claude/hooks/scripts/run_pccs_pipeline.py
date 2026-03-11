@@ -287,6 +287,7 @@ def run_full_after_b1(
     assessment_path = os.path.join(work_dir, "pccs-assessment.json")
 
     # Extract JSON from B-1 response
+    b1_extraction_failed = False
     b1_text = _read_text(b1_response_path)
     if b1_text:
         extracted = extract_json_block(b1_text)
@@ -294,13 +295,24 @@ def run_full_after_b1(
             _write_json(assessment_path, extracted)
             print(f"[run_pccs_pipeline] B-1 JSON extracted → pccs-assessment.json")
         else:
-            _write_json(assessment_path, {"assessments": []})
+            b1_extraction_failed = True
+            _write_json(assessment_path, {
+                "assessments": [],
+                "_extraction_failed": True,
+                "_reason": "JSON extraction from evaluator response failed",
+            })
             print(
-                "[run_pccs_pipeline] B-1 extraction failed — empty assessment fallback",
+                "[run_pccs_pipeline] B-1 extraction FAILED — "
+                "Orchestrator MUST retry @claim-quality-evaluator",
                 file=sys.stderr,
             )
     else:
-        _write_json(assessment_path, {"assessments": []})
+        b1_extraction_failed = True
+        _write_json(assessment_path, {
+            "assessments": [],
+            "_extraction_failed": True,
+            "_reason": f"B-1 response not readable: {b1_response_path}",
+        })
         print(
             f"[run_pccs_pipeline] B-1 response not readable: {b1_response_path}",
             file=sys.stderr,
@@ -328,7 +340,11 @@ def run_full_after_b1(
             file=sys.stderr,
         )
 
-    return {"assessment_path": assessment_path, "validation_passed": validation_passed}
+    return {
+        "assessment_path": assessment_path,
+        "validation_passed": validation_passed,
+        "extraction_failed": b1_extraction_failed,
+    }
 
 
 def run_full_finalize(
@@ -354,19 +370,31 @@ def run_full_finalize(
     # Extract JSON from B-2 response
     b2_text = _read_text(b2_response_path)
     critic_path = os.path.join(work_dir, "pccs-critic.json")
+    b2_extraction_failed = False
     if b2_text:
         extracted = extract_json_block(b2_text)
         if extracted:
             _write_json(critic_path, extracted)
             print(f"[run_pccs_pipeline] B-2 JSON extracted → pccs-critic.json")
         else:
-            _write_json(critic_path, {"judgments": [], "additions": []})
+            b2_extraction_failed = True
+            _write_json(critic_path, {
+                "judgments": [], "additions": [],
+                "_extraction_failed": True,
+                "_reason": "JSON extraction from critic response failed",
+            })
             print(
-                "[run_pccs_pipeline] B-2 extraction failed — empty critic fallback",
+                "[run_pccs_pipeline] B-2 extraction FAILED — "
+                "proceeding with P1-only scoring (DEGRADED fallback)",
                 file=sys.stderr,
             )
     else:
-        _write_json(critic_path, {"judgments": [], "additions": []})
+        b2_extraction_failed = True
+        _write_json(critic_path, {
+            "judgments": [], "additions": [],
+            "_extraction_failed": True,
+            "_reason": f"B-2 response not readable: {b2_response_path}",
+        })
         print(
             f"[run_pccs_pipeline] B-2 response not readable: {b2_response_path}",
             file=sys.stderr,

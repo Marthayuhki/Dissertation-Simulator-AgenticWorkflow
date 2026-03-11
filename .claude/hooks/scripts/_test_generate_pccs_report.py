@@ -705,14 +705,13 @@ class TestGenerateReport(unittest.TestCase):
             self.assertGreater(s["mean_pccs"], 0)
 
     def test_empty_claims_list(self):
-        """Claim map with empty claims list → valid but empty report."""
+        """GAP-2: Claim map with empty claims list → rewrite_step (not proceed)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             cm = {"step": 10, "file": "output.md", "claims": []}
             cm_path = self._write_json(tmpdir, "claim-map.json", cm)
             report = generate_report(cm_path)
-            self.assertEqual(report["summary"]["total_claims"], 0)
-            self.assertEqual(report["summary"]["mean_pccs"], 0)
-            self.assertEqual(report["decision"]["action"], "proceed")
+            self.assertEqual(report["decision"]["action"], "rewrite_step")
+            self.assertEqual(report["decision"]["reason"], "empty_claim_map")
 
     def test_missing_p1_signals_defaults(self):
         """Missing p1_signals in claim → blocked=False by default."""

@@ -1106,6 +1106,24 @@
 - **파급 효과**: `validate_wave_gate.py`, `validate_thesis_output.py`, `_test_validate_wave_gate.py` (9 tests)
 - **관련 ADR**: ADR-068 (Step Consolidation), ADR-054 (GroundedClaim Schema)
 
+### ADR-071: Hallucination Containment — V-1~V-4 취약점 + GAP-1~GAP-6 P1 결정론적 봉쇄
+
+- **날짜**: 2026-03-11
+- **상태**: Accepted
+- **맥락**: Orchestrator가 LLM 추론에 의존하는 4가지 취약점(V-1: 산출물 파일 경로 해석, V-2: Dialogue 루프 종료 판단, V-3: Fallback 에스컬레이션, V-4: 통합 그룹 분할 전략)과 6가지 커버리지 갭(GAP-1: pCCS 빈 JSON fallback, GAP-2: 빈 claim-map 스코어링, GAP-3: claim prefix 불일치, GAP-4: placeholder 콘텐츠 통과, GAP-6: Phase 2 undecided research_type)이 비결정론적 동작을 유발할 수 있었다.
+- **결정**:
+  - `verify_step_output.py` (신규): VO-1~VO-5 결정론적 산출물 검증. V-1, GAP-3, GAP-4 제거
+  - `determine_dialogue_outcome.py` (신규): All PASS→consensus, Any FAIL→continue/escalate. V-2 제거
+  - `fallback_controller.py`: `split_consolidated_group()` binary split 함수 추가. V-4 제거
+  - `generate_pccs_report.py`: 빈 claim-map → `rewrite_step` (기존: `proceed`). GAP-2 제거
+  - `run_pccs_pipeline.py`: B-1/B-2 추출 실패 시 `_extraction_failed: True` 플래깅. GAP-1 제거
+  - `query_step.py`: Phase 2 + undecided → 명시적 에러 반환. GAP-6 제거
+  - `thesis-orchestrator.md`: E5.1 mandatory verify_step_output.py 호출, Dialogue Protocol P1 decision-first 순서, Consolidation Fallback mandatory --split-group 호출
+- **근거**: 절대 기준 1(품질) — LLM 추론 의존 지점을 P1 결정론적 스크립트로 대체하여 Orchestrator 동작의 재현성·신뢰성 보장. P1 Sandwich 확장 (ADR-024의 직접 후속).
+- **대안**: LLM 프롬프트 강화로 일관성 개선 → 기각 (비결정론적 본질 해결 불가). 전체 프로토콜을 P1으로 재작성 → 기각 (LLM 유연성 상실).
+- **파급 효과**: `verify_step_output.py`, `determine_dialogue_outcome.py`, `fallback_controller.py`, `generate_pccs_report.py`, `run_pccs_pipeline.py`, `query_step.py`, `thesis-orchestrator.md`, `_test_verify_step_output.py` (30 tests), `_test_determine_dialogue_outcome.py` (19 tests)
+- **관련 ADR**: ADR-024 (P1 봉쇄), ADR-064 (query_step.py), ADR-068 (Step Consolidation), ADR-069 (Consolidation Fallback)
+
 ---
 
 ## 문서 관리

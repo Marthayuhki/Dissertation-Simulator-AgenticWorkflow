@@ -109,12 +109,11 @@ class TestRunDegraded(unittest.TestCase):
             self.assertEqual(report["calibration"]["cal_delta"], 0.0)
 
     def test_degraded_empty_file(self):
-        """Empty file → 0 claims, proceed."""
+        """GAP-2: Empty file → 0 claims, rewrite_step (not proceed)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             claim_file = _write_text(tmpdir, "empty.md", "# Nothing here\n")
             report = run_degraded(claim_file, 1, tmpdir)
-            self.assertEqual(report["summary"]["total_claims"], 0)
-            self.assertEqual(report["decision"]["action"], "proceed")
+            self.assertEqual(report["decision"]["action"], "rewrite_step")
 
     def test_degraded_auto_tempdir(self):
         """Without explicit work_dir, tempdir should be auto-created."""

@@ -282,6 +282,38 @@ def record_fallback(
     }
 
 
+def split_consolidated_group(group_steps: list[int]) -> list[list[int]]:
+    """P1 deterministic: split a failed consolidated group into sub-groups.
+
+    Algorithm (binary split until size <= 2):
+        - group size > 4 → split in half
+        - group size 3-4 → split into pairs
+        - group size 2 → split into individuals
+        - group size 1 → return as-is (individual execution)
+
+    This eliminates V-4: "Consolidated group split strategy is non-deterministic."
+    The Orchestrator MUST use this function's output for split decisions.
+
+    Args:
+        group_steps: List of step numbers in the failed consolidated group.
+
+    Returns:
+        List of sub-groups (each is a list of step numbers).
+    """
+    if len(group_steps) <= 1:
+        return [group_steps] if group_steps else []
+
+    if len(group_steps) == 2:
+        # Split into individual steps
+        return [[s] for s in group_steps]
+
+    # Binary split
+    mid = len(group_steps) // 2
+    left = group_steps[:mid]
+    right = group_steps[mid:]
+    return [left, right]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fallback Controller")
     parser.add_argument("--project-dir", required=True)
@@ -299,6 +331,8 @@ def main():
                        help="Record successful completion")
     group.add_argument("--record-fallback", action="store_true",
                        help="Record a fallback tier switch")
+    group.add_argument("--split-group", action="store_true",
+                       help="Split a failed consolidated group into sub-groups")
     group.add_argument("--log", action="store_true",
                        help="Show fallback log")
 
@@ -308,6 +342,8 @@ def main():
                         help="Source tier (for --record-fallback)")
     parser.add_argument("--to-tier", choices=TIER_ORDER,
                         help="Target tier (for --record-fallback)")
+    parser.add_argument("--group-steps", type=str,
+                        help="Comma-separated step numbers for --split-group (e.g., '39,40,41,42')")
     args = parser.parse_args()
 
     if args.log:
@@ -320,6 +356,15 @@ def main():
                 print(f"[{ts}] Step {entry.get('step')}: "
                       f"{entry.get('action')} @ {entry.get('tier')}"
                       f" — {entry.get('reason', '')}")
+        return 0
+
+    if args.split_group:
+        if not args.group_steps:
+            parser.error("--split-group requires --group-steps (comma-separated)")
+        steps = [int(s.strip()) for s in args.group_steps.split(",") if s.strip()]
+        sub_groups = split_consolidated_group(steps)
+        result = {"original_group": steps, "sub_groups": sub_groups, "count": len(sub_groups)}
+        print(json.dumps(result, indent=2))
         return 0
 
     if args.step is None:
