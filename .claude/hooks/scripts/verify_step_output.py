@@ -43,6 +43,7 @@ Checks:
     VO-5: Claim prefix matches expected agent prefix
     VO-6: No banned academic expressions (WARNING, non-blocking)
     VO-7: Heading structure present for files >2000 bytes (FAIL)
+    VO-8: Search-prefetch steps reference cached data (WARNING, non-blocking)
 
 Exit codes:
     0 — always (P1 compliant, non-blocking)
@@ -68,6 +69,7 @@ if _SCRIPT_DIR not in sys.path:
 
 from _claim_patterns import CLAIM_ID_INLINE_RE, extract_claim_ids  # noqa: E402
 from checklist_manager import AGENT_CLAIM_PREFIXES  # noqa: E402
+from query_step import DW_CHECK_EXEMPT_AGENTS  # noqa: E402
 
 # Lazy import to avoid circular dependency at module level
 _query_step_module = None
@@ -130,13 +132,25 @@ _BANNED_EXPRESSION_PATTERNS: list[re.Pattern[str]] = [
     ]
 ]
 
-# Agents exempt from VO-6/VO-7 (non-text-producing or special roles)
-_DW_CHECK_EXEMPT_AGENTS: set[str] = {
-    "_orchestrator", "translator",
-}
+# DW_CHECK_EXEMPT_AGENTS imported from query_step.py (single SOT — D-2)
 
 # Minimum heading threshold (VO-7)
 _HEADING_MIN_BYTES = 2000
+
+# =============================================================================
+# Search Cache Reference Patterns (VO-8, P1 deterministic — WARNING only)
+# =============================================================================
+# For search_prefetch steps, check if the agent output references cached data.
+
+_CACHE_REF_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"search[_-]cache",
+        r"cached\s+(?:search\s+)?results?",
+        r"pre[_-]fetched",
+        r"academic\s+database\s+search",
+        r"step-\d+-results\.json",
+    ]
+]
 
 
 def _detect_banned_expressions(content: str) -> list[str]:
@@ -149,9 +163,15 @@ def _detect_banned_expressions(content: str) -> list[str]:
     return found
 
 
-def _has_heading_structure(content: str) -> bool:
-    """Check if content has at least one markdown heading (## or deeper)."""
-    return bool(re.search(r'^#{2,}\s+\S', content, re.MULTILINE))
+def _has_heading_structure(content: str, file_size: int = 0) -> bool:
+    """Check if content has sufficient markdown heading structure.
+
+    For files >2KB: require at least 2 headings (## or deeper).
+    For smaller files: require at least 1 heading.
+    """
+    headings = re.findall(r'^#{2,}\s+\S', content, re.MULTILINE)
+    min_headings = 2 if file_size > _HEADING_MIN_BYTES else 1
+    return len(headings) >= min_headings
 
 
 def _detect_placeholders(content: str) -> list[str]:
@@ -372,7 +392,7 @@ def verify_step_output(
     # ===================================================================
     # VO-6: No banned academic expressions (WARNING — non-blocking)
     # ===================================================================
-    if agent not in _DW_CHECK_EXEMPT_AGENTS and content:
+    if agent not in DW_CHECK_EXEMPT_AGENTS and content:
         banned = _detect_banned_expressions(content)
         if banned:
             checks["VO6_no_banned_expr"] = "WARN"
@@ -388,19 +408,40 @@ def verify_step_output(
     # ===================================================================
     # VO-7: Heading structure for files >2000 bytes (FAIL)
     # ===================================================================
-    if agent not in _DW_CHECK_EXEMPT_AGENTS and content and file_size >= _HEADING_MIN_BYTES:
-        if _has_heading_structure(content):
+    if agent not in DW_CHECK_EXEMPT_AGENTS and content and file_size >= _HEADING_MIN_BYTES:
+        if _has_heading_structure(content, file_size):
             checks["VO7_heading_structure"] = "PASS"
         else:
             checks["VO7_heading_structure"] = "FAIL"
             errors.append(
-                f"VO-7: File is {file_size} bytes but has no heading structure "
-                f"(expected at least one ## heading)"
+                f"VO-7: File is {file_size} bytes but has insufficient heading structure "
+                f"(expected at least 2 ## headings for files > {_HEADING_MIN_BYTES} bytes)"
             )
-    elif agent in _DW_CHECK_EXEMPT_AGENTS:
+    elif agent in DW_CHECK_EXEMPT_AGENTS:
         checks["VO7_heading_structure"] = f"SKIP (agent '{agent}' exempt)"
     else:
         checks["VO7_heading_structure"] = "SKIP (file < 2000 bytes)"
+
+    # ===================================================================
+    # VO-8: Search-prefetch steps reference cached data (WARNING)
+    # ===================================================================
+    # Hallucination Vector 4: agents with search_prefetch should use
+    # cached search results. If the output doesn't mention search-cache
+    # or cached data, the agent likely ignored the pre-fetched results.
+    search_prefetch = step_info.get("search_prefetch", False)
+    if search_prefetch and content:
+        has_cache_ref = any(p.search(content) for p in _CACHE_REF_PATTERNS)
+        if has_cache_ref:
+            checks["VO8_search_cache_used"] = "PASS"
+        else:
+            checks["VO8_search_cache_used"] = "WARN"
+            warnings.append(
+                "VO-8: This step has search_prefetch=True but the output "
+                "does not reference cached search results. The agent may "
+                "have ignored the pre-fetched academic database data."
+            )
+    else:
+        checks["VO8_search_cache_used"] = "SKIP (not a search-prefetch step)"
 
     # Compute overall result
     is_valid = not any(v == "FAIL" for v in checks.values())

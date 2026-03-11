@@ -33,6 +33,23 @@ import sys
 from typing import Any
 
 # ---------------------------------------------------------------------------
+# Doctoral Writing exemptions — agents that skip VO-6/VO-7 checks
+# Single SOT: imported by verify_step_output.py
+# ---------------------------------------------------------------------------
+DW_CHECK_EXEMPT_AGENTS: set[str] = {"_orchestrator", "translator"}
+
+# ---------------------------------------------------------------------------
+# Academic Search Pre-fetch — agents that benefit from cached search results
+# Single SOT: determines which steps trigger run_academic_search.py pre-fetch
+# ---------------------------------------------------------------------------
+SEARCH_PREFETCH_AGENTS: set[str] = {
+    "literature-searcher",
+    "seminal-works-analyst",
+    "trend-analyst",
+    "empirical-evidence-analyst",
+}
+
+# ---------------------------------------------------------------------------
 # Step Registry — THE single source of truth for step execution parameters
 # ---------------------------------------------------------------------------
 
@@ -250,6 +267,31 @@ def _get_execution_command(step: int) -> str | None:
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     script_path = os.path.join(scripts_dir, script_name)
     return f"{sys.executable} {script_path} {args_template}"
+
+
+def _get_pre_execution_command(step: int, agent: str) -> str | None:
+    """Return P1 deterministic pre-execution command for a step, or None.
+
+    Hallucination Containment (Vector 2): steps with search_prefetch=True
+    get a deterministic bash command that the Orchestrator MUST run BEFORE
+    dispatching the agent. This eliminates prose-based pre-fetch instructions.
+
+    The command uses --auto-from-sot to read query from session.json (P1),
+    preventing LLM-constructed query strings (Vector 1).
+
+    Template variables:
+      {project_dir} — resolved by Orchestrator at runtime
+      {step} — resolved here (compile-time known)
+    """
+    if agent not in SEARCH_PREFETCH_AGENTS:
+        return None
+    import os
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    script_path = os.path.join(scripts_dir, "run_academic_search.py")
+    return (
+        f"{sys.executable} {script_path} "
+        f"--auto-from-sot --project-dir {{project_dir}} --step {step}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -802,6 +844,12 @@ def query_step(step: int, research_type: str = "undecided") -> dict[str, Any]:
         "min_output_bytes": consol["min_output_bytes"],
         # Execution command (P1 deterministic bash command for automated steps)
         "execution_command": _get_execution_command(step),
+        # Academic search pre-fetch (P1 deterministic)
+        "search_prefetch": agent in SEARCH_PREFETCH_AGENTS,
+        # Pre-execution command (P1 deterministic — Hallucination Vector 2)
+        # Orchestrator MUST run this BEFORE dispatching the agent.
+        # Uses --auto-from-sot for query derivation (Vector 1 containment).
+        "pre_execution_command": _get_pre_execution_command(step, agent),
     }
 
 

@@ -91,8 +91,14 @@ def compute_verifiability_score(content: str, claim_count: int) -> int:
     verified_ratio = min(verified / max(claim_count, 1), 1.0)
     verified_score = verified_ratio * 20  # 20 points
 
-    # Specific references (page numbers, sections)
-    specifics = len(re.findall(r'(?:p\.\s*\d+|pp\.\s*\d+|chapter\s+\d+|section\s+\d+)', content, re.IGNORECASE))
+    # Specific references (page numbers, sections, volumes, tables, figures)
+    specifics = len(re.findall(
+        r'(?:p\.\s*\d+|pp\.\s*\d+[-–]\d+|p\s+\d+|'
+        r'chapter\s+\d+|section\s+\d+|'
+        r'vol\.\s*\d+|volume\s+\d+|'
+        r'table\s+\d+|figure\s+\d+|fig\.\s*\d+)',
+        content, re.IGNORECASE,
+    ))
     specific_score = min(specifics / max(claim_count, 1), 1.0) * 20  # 20 points
 
     return min(round(doi_score + url_score + verified_score + specific_score), MAX_VS_SCORE)

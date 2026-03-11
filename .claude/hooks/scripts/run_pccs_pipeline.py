@@ -206,7 +206,7 @@ def run_degraded(
     )
 
     # SOT update (with both calibration and report)
-    _update_sot(project_dir, report_path, cal_path)
+    sot_updated = _update_sot(project_dir, report_path, cal_path)
 
     s = report.get("summary", {})
     d = report.get("decision", {})
@@ -214,8 +214,19 @@ def run_degraded(
         f"[run_pccs_pipeline] DEGRADED complete: "
         f"{s.get('total_claims', 0)} claims, mean={s.get('mean_pccs', 0)}, "
         f"G={s.get('green', 0)}/Y={s.get('yellow', 0)}/R={s.get('red', 0)}, "
-        f"action={d.get('action', '?')}"
+        f"action={d.get('action', '?')}, sot_updated={sot_updated}"
     )
+
+    report["sot_updated"] = sot_updated
+
+    # A-2: Flag empty claim_map for Orchestrator retry
+    if n_claims == 0:
+        report["retry_required"] = True
+        report["retry_reason"] = "Phase A extracted 0 claims — file may be empty or malformed"
+        print(
+            "[run_pccs_pipeline] WARNING: 0 claims extracted — retry_required=True",
+            file=sys.stderr,
+        )
 
     return report
 
@@ -340,11 +351,18 @@ def run_full_after_b1(
             file=sys.stderr,
         )
 
-    return {
+    result: dict[str, Any] = {
         "assessment_path": assessment_path,
         "validation_passed": validation_passed,
         "extraction_failed": b1_extraction_failed,
     }
+
+    # A-2: Flag extraction failure for Orchestrator retry
+    if b1_extraction_failed:
+        result["retry_required"] = True
+        result["retry_reason"] = "B-1 JSON extraction failed — Orchestrator MUST retry @claim-quality-evaluator"
+
+    return result
 
 
 def run_full_finalize(
@@ -439,7 +457,7 @@ def run_full_finalize(
     )
 
     # SOT update (with both calibration and report)
-    _update_sot(project_dir, report_path, cal_path)
+    sot_updated = _update_sot(project_dir, report_path, cal_path)
 
     s = report.get("summary", {})
     d = report.get("decision", {})
@@ -447,9 +465,10 @@ def run_full_finalize(
         f"[run_pccs_pipeline] FULL finalize: "
         f"{s.get('total_claims', 0)} claims, mean={s.get('mean_pccs', 0)}, "
         f"G={s.get('green', 0)}/Y={s.get('yellow', 0)}/R={s.get('red', 0)}, "
-        f"action={d.get('action', '?')}"
+        f"action={d.get('action', '?')}, sot_updated={sot_updated}"
     )
 
+    report["sot_updated"] = sot_updated
     return report
 
 

@@ -432,7 +432,8 @@ class TestVO7Integration(unittest.TestCase):
             os.makedirs(wave_dir)
             fpath = os.path.join(wave_dir, "step-042-output.md")
             Path(fpath).write_text(
-                "## Literature Analysis\n\n" + "Content paragraph. " * 300,
+                "## Literature Analysis\n\nContent paragraph. " * 150
+                + "\n\n## Results\n\n" + "More content. " * 150,
                 encoding="utf-8"
             )
             result = verify_step_output(42, tmpdir)

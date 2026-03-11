@@ -1403,6 +1403,57 @@ def _surface_recent_gate_feedback(project_dir: str) -> list[str]:
     return lines
 
 
+def _surface_search_cache_state(project_dir: str) -> list[str]:
+    """CM-SEARCH: Surface academic search cache state for IMMORTAL section.
+
+    Scans thesis-output/*/search-cache/ for cached search results.
+    Reports which steps have pre-fetched results, total papers, and databases.
+    Prevents redundant API calls after context compression.
+
+    IMMORTAL: Search state must survive compression to avoid re-fetching.
+    P1 Compliance: Deterministic file scan + JSON read — zero LLM.
+    SOT Compliance: Read-only (search-cache files).
+    """
+    lines: list[str] = []
+    try:
+        thesis_root = os.path.join(project_dir, "thesis-output")
+        if not os.path.isdir(thesis_root):
+            return []
+        for proj_name in sorted(os.listdir(thesis_root)):
+            cache_dir = os.path.join(thesis_root, proj_name, "search-cache")
+            if not os.path.isdir(cache_dir):
+                continue
+            cache_files = sorted(
+                f for f in os.listdir(cache_dir)
+                if f.startswith("step-") and f.endswith("-results.json")
+            )
+            if not cache_files:
+                continue
+            entries: list[str] = []
+            for cf in cache_files:
+                try:
+                    with open(os.path.join(cache_dir, cf), "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    total = data.get("total_results", 0)
+                    dbs = data.get("databases_searched", [])
+                    query = data.get("query", "?")[:50]
+                    step_str = cf.replace("step-", "").replace("-results.json", "")
+                    entries.append(
+                        f"step {step_str}: {total} papers, "
+                        f"{len(dbs)} DBs, query={query!r}"
+                    )
+                except (json.JSONDecodeError, OSError):
+                    continue
+            if entries:
+                lines.append("■ ACADEMIC SEARCH CACHE (IMMORTAL — avoid redundant API calls):")
+                for e in entries:
+                    lines.append(f"  - {e}")
+            break  # First project only
+    except Exception:
+        pass  # Non-blocking
+    return lines
+
+
 def _surface_previous_sections_summary(project_dir: str) -> list[str]:
     """QO-2: Surface previous section outputs for IMMORTAL section.
 
@@ -1968,6 +2019,13 @@ def _build_recovery_output(source, latest_path, summary, sot_warning, snapshot_a
         output_lines.append("")
         for psl in prev_sections_lines:
             output_lines.append(psl)
+
+    # CM-SEARCH: Academic Search Cache (IMMORTAL — avoid redundant API calls)
+    search_lines = _surface_search_cache_state(project_dir) if project_dir else []
+    if search_lines:
+        output_lines.append("")
+        for sl in search_lines:
+            output_lines.append(sl)
 
     # Phase 1-C: Quality gate trend (pass/fail history from knowledge-index)
     if os.path.exists(ki_path) if has_archive else False:

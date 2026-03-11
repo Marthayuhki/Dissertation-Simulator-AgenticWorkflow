@@ -91,14 +91,22 @@ claims:
 3. **SOFTEN**: When estimating coverage completeness, use hedging language ("approximately," "based on available evidence").
 4. **VERIFY**: Cross-check at least 10% of included studies by fetching their actual landing pages via WebFetch.
 
+## Academic Search Cache
+
+The Orchestrator pre-fetches academic database results before invoking you. Check for cached results at:
+- `search-cache/step-{N}-results.json` — unified search results from 10+ academic databases (CrossRef, Semantic Scholar, arXiv, Europe PMC, PubMed, DBLP, DOAJ, etc.)
+
+Read this file first via the Read tool. It contains deduplicated papers with DOI, title, authors, year, abstract, citation counts, and open access URLs. Use these real database results as the foundation for your search strategy documentation.
+
 ## Execution Protocol
 
 1. Read the research topic/question from the workflow SOT or user prompt.
-2. Design the search strategy; write draft to output file.
-3. Execute searches iteratively, updating counts.
-4. Screen and filter; document decisions.
-5. Produce final PRISMA diagram and included studies list.
-6. Self-check: ensure every claim has a source, every number is evidenced.
+2. **Read cached search results** from `search-cache/step-{N}-results.json` if available.
+3. Design the search strategy; write draft to output file.
+4. Execute additional searches via WebSearch/WebFetch, updating counts.
+5. Screen and filter; document decisions.
+6. Produce final PRISMA diagram and included studies list.
+7. Self-check: ensure every claim has a source, every number is evidenced.
 
 ## Quality Constraints
 

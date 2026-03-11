@@ -1,3 +1,20 @@
+[project]
+name = "dissertation-simulator"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.31.0",
+    "arxiv>=2.1.0",
+    "habanero>=1.2.0",
+    "pyalex>=0.14",
+]
+
+[project.optional-dependencies]
+korean = [
+    # Korean academic DB adapters (KCI, DBpia, RISS, ScienceON)
+    # No extra packages needed — all use requests + XML stdlib
+]
+
 [tool.mypy]
 python_version = "3.14"
 warn_return_any = true

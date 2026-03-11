@@ -196,6 +196,22 @@ def compute_calibration(
     else:
         cal_delta = 0.0  # No calibration data → no adjustment
 
+    # B-1: Clamp cal_delta to [-20, +20] — extreme values indicate data issues
+    if cal_delta > 20.0:
+        print(
+            f"[pccs_calibration] WARNING: cal_delta={cal_delta:.1f} clamped to 20.0 "
+            f"(extreme overconfidence — check ground truth data)",
+            file=sys.stderr,
+        )
+        cal_delta = 20.0
+    elif cal_delta < -20.0:
+        print(
+            f"[pccs_calibration] WARNING: cal_delta={cal_delta:.1f} clamped to -20.0 "
+            f"(extreme underconfidence — check ground truth data)",
+            file=sys.stderr,
+        )
+        cal_delta = -20.0
+
     return {
         "cal_delta": round(cal_delta, 1),
         "tier1_samples": len(tier1),

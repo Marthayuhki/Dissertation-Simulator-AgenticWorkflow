@@ -110,13 +110,18 @@ REQUIRED_SCRIPTS = [
     "validate_team_synthesis.py",
     # Type checking hook
     "run_mypy_check.py",
-    # Step Execution Registry — H-1~H-7 hallucination containment (Phase L)
+    # Step Execution Registry — H-1~H-8 hallucination containment (Phase L)
     "query_step.py",
+    # Hallucination Containment — V-1/V-2 (Phase L-2)
+    "verify_step_output.py",
+    "determine_dialogue_outcome.py",
     # KBSI — Knowledge-Based Self-Improvement (Phase M)
     "self_improve_manager.py",
     "validate_self_improvement.py",
     # Skill output validation (Phase N)
     "validate_skill_output.py",
+    # Academic search pre-fetch (Phase O)
+    "run_academic_search.py",
 ]
 
 # Severity levels

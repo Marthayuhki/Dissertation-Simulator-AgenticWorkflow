@@ -78,7 +78,8 @@ AgenticWorkflow에는 211-step 박사 논문 연구 시뮬레이션 워크플로
 | GroundedClaim 스키마 | `validate_grounded_claim.py`로 claim ID 검증. Gemini 출력도 동일 스키마 준수 필수 |
 | Step Consolidation | 동일 에이전트 연속 Step을 단일 호출로 통합 (210→17 invocations). `query_step.py --consolidated-prompt`, `--next-step`, `--invocation-plan` CLI로 제어. Gemini에서는 해당 CLI를 직접 호출하여 통합 프롬프트·다음 Step을 결정론적으로 획득 |
 | Consolidation Fallback | 통합 그룹 3회 실패 시 `fallback_controller.py --split-group` P1 결정론적 분할 → 개별 Step 재시도. `checklist_manager.py --advance-group` CLI로 원자적 SOT 갱신 |
-| Hallucination Containment | V-1~V-4 취약점 + GAP-1~GAP-6+GAP-DW P1 결정론적 봉쇄 (ADR-071, ADR-072). `verify_step_output.py`(VO-1~VO-7 산출물+DW 품질 검증), `determine_dialogue_outcome.py`(대화 루프 종료 판단). Gemini에서도 CLI 직접 호출 가능 |
+| Hallucination Containment | V-1~V-4 취약점 + GAP-1~GAP-6+GAP-DW + Academic Search V-1~V-4/H-1~H-2 P1 결정론적 봉쇄 (ADR-071, ADR-072, ADR-075). `verify_step_output.py`(VO-1~VO-8 산출물+DW 품질+검색캐시 검증), `determine_dialogue_outcome.py`(대화 루프 종료 판단), `run_academic_search.py`(--auto-from-sot 검색 프리페치). Gemini에서도 CLI 직접 호출 가능 |
+| Academic Search Pre-fetch | `run_academic_search.py --auto-from-sot`로 SOT에서 P1 결정론적 쿼리 추출 → `search-cache/`에 캐시 → 에이전트가 참조. `--register-search-cache`/`--is-search-cached` CLI로 SOT 등록·확인. Gemini에서 직접 호출 가능 (ADR-075) |
 | 3-tier Fallback | Team → Sub-agent → Direct. Gemini는 Direct 실행만 가능 |
 
 ## 컨텍스트 보존

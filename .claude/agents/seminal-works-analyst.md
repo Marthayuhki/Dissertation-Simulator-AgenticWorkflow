@@ -87,14 +87,22 @@ claims:
 3. **SOFTEN**: When inferring influence or intellectual lineage, use "suggests," "appears to have influenced," rather than absolute claims.
 4. **VERIFY**: Cross-check citation counts for top-10 works using WebSearch against Google Scholar or Semantic Scholar.
 
+## Academic Search Cache
+
+The Orchestrator pre-fetches academic database results before invoking you. Check for cached results at:
+- `search-cache/step-{N}-results.json` — unified search results from 10+ academic databases with citation counts, DOIs, and author metadata
+
+Read this file via the Read tool. Use citation counts from the cached data to identify seminal works, and author metadata to map collaboration networks. This supplements `01-literature-search-strategy.md` with real database metrics.
+
 ## Execution Protocol
 
 1. Read `01-literature-search-strategy.md` for the corpus of identified studies.
-2. Rank studies by citation impact and theoretical contribution.
-3. Build citation network from cross-references.
-4. Map authors and trace lineage.
-5. Produce diagrams and structured output.
-6. Self-check: verify every citation count and author claim against available data.
+2. **Read cached search results** from `search-cache/step-{N}-results.json` if available — use citation counts and author data.
+3. Rank studies by citation impact and theoretical contribution.
+4. Build citation network from cross-references.
+5. Map authors and trace lineage.
+6. Produce diagrams and structured output.
+7. Self-check: verify every citation count and author claim against available data.
 
 ## Quality Constraints
 

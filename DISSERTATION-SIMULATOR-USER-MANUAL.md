@@ -328,6 +328,28 @@ python .claude/hooks/scripts/determine_dialogue_outcome.py \
 # 통합 그룹 분할 (Consolidation Fallback)
 python .claude/hooks/scripts/fallback_controller.py \
   --project-dir thesis-output/my-thesis --split-group --group-steps "39,40,41,42"
+
+# ── Academic Search Pre-fetch (ADR-075) ──
+
+# 학술 검색 프리페치 (SOT에서 결정론적 쿼리 추출 — P1)
+python .claude/hooks/scripts/run_academic_search.py \
+  --auto-from-sot --project-dir thesis-output/my-thesis --step 39
+
+# 수동 쿼리 검색 (Fallback — LLM 구성 쿼리)
+python .claude/hooks/scripts/run_academic_search.py \
+  --query "AI safety alignment" --project-dir thesis-output/my-thesis --step 39 \
+  --max-results 100 --year-from 2020
+
+# 검색 캐시 SOT 등록
+python .claude/hooks/scripts/checklist_manager.py \
+  --register-search-cache --project-dir thesis-output/my-thesis --step 39 \
+  --cache-path search-cache/step-39-results.json --total-results 47 \
+  --databases crossref semantic_scholar --search-query "Education AI safety" \
+  --query-source sot
+
+# 검색 캐시 등록 여부 확인 (SOT + 파일 존재 이중 검증)
+python .claude/hooks/scripts/checklist_manager.py \
+  --is-search-cached --step 39 --project-dir thesis-output/my-thesis
 ```
 
 ---
@@ -353,6 +375,8 @@ thesis-output/my-thesis/
 ├── thesis-draft/                 ← 논문 초고
 ├── publication/                  ← 출판 전략 산출물
 ├── checkpoints/                  ← 체크포인트 스냅샷
+├── search-cache/                 ← 학술 검색 캐시 (run_academic_search.py 생성)
+│   └── step-N-results.json       ← step별 검색 결과 JSON
 ├── verification-logs/            ← 검증 로그
 ├── pacs-logs/                    ← pACS 자기 평가 로그
 ├── pccs-logs/                    ← pCCS per-claim 신뢰도 로그

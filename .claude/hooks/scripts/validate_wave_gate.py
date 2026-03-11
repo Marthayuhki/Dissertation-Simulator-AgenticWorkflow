@@ -63,19 +63,25 @@ MIN_OUTPUT_SIZE = 100
 # count_claims and extract_claim_ids imported from _claim_patterns
 
 
-def check_inconsistencies(all_claims: dict[str, list[str]]) -> list[str]:
-    """Check for cross-file inconsistencies.
+def check_inconsistencies(
+    all_claims: dict[str, list[str]],
+    project_dir: str | None = None,
+    wave_num: int | None = None,
+) -> list[str]:
+    """Check for cross-file and cross-wave inconsistencies.
 
     Args:
-        all_claims: dict of filename → list of claim text excerpts
+        all_claims: dict of filename → list of claim IDs (current wave)
+        project_dir: project root (for loading previous wave claims)
+        wave_num: current wave number (for cross-wave check)
 
     Returns:
         list of inconsistency descriptions
     """
     inconsistencies = []
 
-    # Check for duplicate claim IDs across files
-    all_ids = {}
+    # Check for duplicate claim IDs within current wave
+    all_ids: dict[str, str] = {}
     for filename, ids in all_claims.items():
         for cid in ids:
             if cid in all_ids:
@@ -85,7 +91,42 @@ def check_inconsistencies(all_claims: dict[str, list[str]]) -> list[str]:
             else:
                 all_ids[cid] = filename
 
+    # Cross-wave duplicate check: load claim IDs from previous waves
+    if project_dir and wave_num and wave_num > 1:
+        prev_ids = _load_previous_wave_claims(project_dir, wave_num)
+        for cid, filename in all_ids.items():
+            if cid in prev_ids:
+                inconsistencies.append(
+                    f"Cross-wave duplicate: '{cid}' in wave-{wave_num}/{filename} "
+                    f"already exists in {prev_ids[cid]}"
+                )
+
     return inconsistencies
+
+
+def _load_previous_wave_claims(project_dir: str, current_wave: int) -> dict[str, str]:
+    """Load claim IDs from all waves prior to current_wave.
+
+    Returns:
+        dict of claim_id → "wave-N/filename" source label
+    """
+    prev_ids: dict[str, str] = {}
+    for w in range(1, current_wave):
+        wave_dir = Path(project_dir) / "wave-results" / f"wave-{w}"
+        if not wave_dir.is_dir():
+            continue
+        for md_file in wave_dir.glob("*.md"):
+            if md_file.name.endswith(".ko.md"):
+                continue
+            try:
+                content = md_file.read_text(encoding="utf-8")
+                ids = extract_claim_ids(content)
+                for cid in ids:
+                    if cid not in prev_ids:
+                        prev_ids[cid] = f"wave-{w}/{md_file.name}"
+            except (OSError, UnicodeDecodeError):
+                continue
+    return prev_ids
 
 
 def validate_gate(project_dir: str, gate_name: str) -> dict:
@@ -169,8 +210,8 @@ def validate_gate(project_dir: str, gate_name: str) -> dict:
             "claim_ids": claim_ids,
         })
 
-    # Cross-file consistency check
-    inconsistencies = check_inconsistencies(all_claims)
+    # Cross-file and cross-wave consistency check
+    inconsistencies = check_inconsistencies(all_claims, str(project), wave)
     if inconsistencies:
         for inc in inconsistencies:
             warnings.append(f"Inconsistency: {inc}")

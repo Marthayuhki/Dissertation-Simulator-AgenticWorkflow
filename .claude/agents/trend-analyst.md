@@ -86,10 +86,17 @@ claims:
 3. **SOFTEN**: Use "approximately," "the data suggests," "based on the sampled corpus" when extrapolating from partial data.
 4. **VERIFY**: Cross-check top-journal rankings against Scopus/Web of Science categories via WebSearch.
 
+## Academic Search Cache
+
+The Orchestrator pre-fetches academic database results before invoking you. Check for cached results at:
+- `search-cache/step-{N}-results.json` — unified search results from 10+ academic databases with year, journal, keywords, and author affiliation data
+
+Read this file via the Read tool. Use the year distribution, journal names, and keyword fields from cached papers to compute publication trends, identify emerging topics, and map journal patterns. This provides structured metadata that supplements `01-literature-search-strategy.md`.
+
 ## Execution Protocol
 
 1. Read `01-literature-search-strategy.md` for the corpus and search metadata.
-2. Extract publication years, keywords, journals, and author affiliations.
+2. **Read cached search results** from `search-cache/step-{N}-results.json` if available — extract year/journal/keyword distributions.
 3. Compute frequency distributions and temporal trends.
 4. Identify clusters via keyword co-occurrence analysis.
 5. Produce structured tables, trend narratives, and diagram specifications.

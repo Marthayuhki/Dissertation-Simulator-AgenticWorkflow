@@ -21,6 +21,8 @@ Usage:
   python3 checklist_manager.py --save-checkpoint --project-dir <dir> --checkpoint <name>
   python3 checklist_manager.py --restore-checkpoint --project-dir <dir> --checkpoint <name>
   python3 checklist_manager.py --validate --project-dir <dir>
+  python3 checklist_manager.py --register-search-cache --project-dir <dir> --step <N> --cache-path <path> [--total-results N] [--databases db1 db2] [--search-query Q] [--query-source sot|manual]
+  python3 checklist_manager.py --is-search-cached --project-dir <dir> --step <N>
 """
 
 import argparse
@@ -213,7 +215,7 @@ def validate_thesis_sot(data: dict) -> list[str]:
       TS5: total_steps must be positive integer >= current_step
       TS6: research_type must be in VALID_RESEARCH_TYPES
       TS7: input_mode must be in VALID_INPUT_MODES
-      TS8: outputs must be a dict with string values
+      TS8: outputs must be a dict (string values; search cache entries accept dict)
       TS9: gates must be a dict with valid gate entries
       TS10: created_at and updated_at must be ISO format strings
       TS11: execution_mode must be in VALID_EXECUTION_MODES (if present)
@@ -270,7 +272,12 @@ def validate_thesis_sot(data: dict) -> list[str]:
             errors.append("TS8: outputs must be a dict")
         else:
             for k, v in outputs.items():
-                if not isinstance(v, str):
+                # Search cache entries (step-N-search) store metadata dicts.
+                # All other entries must be string paths.
+                if k.endswith("-search"):
+                    if not isinstance(v, dict):
+                        errors.append(f"TS8: outputs['{k}'] must be dict (search cache), got {type(v).__name__}")
+                elif not isinstance(v, str):
                     errors.append(f"TS8: outputs['{k}'] must be string, got {type(v).__name__}")
 
     # TS9
@@ -1327,6 +1334,59 @@ def record_translation(project_dir: Path, step: int, ko_path: str) -> dict:
     return sot
 
 
+def register_search_cache(
+    project_dir: Path,
+    step: int,
+    cache_path: str,
+    total_results: int,
+    databases_searched: list[str],
+    query: str,
+    query_source: str,
+) -> dict:
+    """Register academic search cache in SOT (Hallucination Vector 3).
+
+    Records pre-fetched search results metadata in session.json so the
+    Orchestrator can check whether a step's search cache already exists
+    before triggering a redundant pre-fetch.
+
+    SOT key: "step-{N}-search" in outputs block.
+    Value: dict with cache metadata (not just a path string).
+    """
+    sot = read_thesis_sot(project_dir)
+
+    key = f"step-{step}-search"
+    sot["outputs"][key] = {
+        "cache_path": cache_path,
+        "total_results": total_results,
+        "databases_searched": databases_searched,
+        "query": query,
+        "query_source": query_source,
+    }
+    write_thesis_sot(project_dir, sot)
+    return sot
+
+
+def is_search_cache_registered(project_dir: Path, step: int) -> bool:
+    """P1 deterministic: check if search cache is already registered AND file exists.
+
+    Prevents redundant academic search pre-fetch after context compression.
+    Checks BOTH SOT entry AND disk file existence to avoid the scenario where
+    SOT says 'cached' but the file was deleted (git clean, user cleanup, etc.).
+    """
+    try:
+        sot = read_thesis_sot(project_dir)
+        key = f"step-{step}-search"
+        entry = sot.get("outputs", {}).get(key)
+        if not isinstance(entry, dict) or not entry.get("cache_path"):
+            return False
+        # Verify actual file exists on disk (H-1 fix)
+        cache_path = entry["cache_path"]
+        full_path = os.path.join(str(project_dir), cache_path)
+        return os.path.isfile(full_path)
+    except Exception:
+        return False
+
+
 def record_gate_result(
     project_dir: Path,
     gate_name: str,
@@ -2045,6 +2105,8 @@ def main():
     group.add_argument("--set-substep", metavar="SUBSTEP", help="Record current execution sub-step within active step (e.g. L1_verification, L2_dialogue_round_2); use 'clear' to reset")
     group.add_argument("--update-pccs-cal", action="store_true", help="Update pCCS calibration data in SOT")
     group.add_argument("--advance-group", action="store_true", help="Advance consolidated step group atomically")
+    group.add_argument("--register-search-cache", action="store_true", help="Register academic search cache in SOT (Hallucination Vector 3)")
+    group.add_argument("--is-search-cached", action="store_true", help="Check if search cache already exists for a step")
 
     parser.add_argument("--project-name", help="Project name (default: directory name)")
     parser.add_argument("--research-type", choices=sorted(VALID_RESEARCH_TYPES))
@@ -2075,6 +2137,12 @@ def main():
     parser.add_argument("--outcome", choices=sorted(VALID_DIALOGUE_OUTCOMES), help="Dialogue outcome (for --dialogue-end)")
     parser.add_argument("--pccs-report", help="Path to pccs-report.json (for --update-pccs-cal)")
     parser.add_argument("--pccs-cal", help="Path to pccs-calibration.json (for --update-pccs-cal)")
+    # Search cache registration (Hallucination Vector 3)
+    parser.add_argument("--cache-path", help="Search cache file path (for --register-search-cache)")
+    parser.add_argument("--total-results", type=int, help="Total results count (for --register-search-cache)")
+    parser.add_argument("--databases", nargs="*", help="Databases searched (for --register-search-cache)")
+    parser.add_argument("--search-query", help="Search query used (for --register-search-cache)")
+    parser.add_argument("--query-source", choices=["sot", "manual"], help="Query source (for --register-search-cache)")
 
     args = parser.parse_args()
 
@@ -2120,6 +2188,56 @@ def main():
         return _cli_update_pccs_cal(args)
     elif args.advance_group:
         return _cli_advance_group(args)
+    elif args.register_search_cache:
+        return _cli_register_search_cache(args)
+    elif args.is_search_cached:
+        return _cli_is_search_cached(args)
+
+
+def _cli_register_search_cache(args) -> int:
+    """CLI handler for --register-search-cache.
+
+    Registers academic search cache metadata in SOT (Hallucination Vector 3).
+    Called by Orchestrator after successful run_academic_search.py execution.
+    """
+    if args.step is None:
+        print("ERROR: --register-search-cache requires --step N", file=sys.stderr)
+        return 1
+    if not args.cache_path:
+        print("ERROR: --register-search-cache requires --cache-path", file=sys.stderr)
+        return 1
+    try:
+        project_dir = Path(args.project_dir)
+        sot = register_search_cache(
+            project_dir,
+            step=args.step,
+            cache_path=args.cache_path,
+            total_results=args.total_results or 0,
+            databases_searched=args.databases or [],
+            query=args.search_query or "",
+            query_source=args.query_source or "unknown",
+        )
+        key = f"step-{args.step}-search"
+        print(json.dumps({"ok": True, "key": key, "entry": sot["outputs"].get(key)}))
+        return 0
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
+def _cli_is_search_cached(args) -> int:
+    """CLI handler for --is-search-cached.
+
+    P1 deterministic check: returns JSON with 'cached' boolean.
+    Orchestrator uses this to skip redundant pre-fetch after context compression.
+    """
+    if args.step is None:
+        print("ERROR: --is-search-cached requires --step N", file=sys.stderr)
+        return 1
+    project_dir = Path(args.project_dir)
+    cached = is_search_cache_registered(project_dir, args.step)
+    print(json.dumps({"step": args.step, "cached": cached}))
+    return 0
 
 
 def _cli_advance_group(args) -> int:

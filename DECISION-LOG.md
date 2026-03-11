@@ -1189,6 +1189,29 @@
 - **파급 효과**: 기존 테스트 전체 유지. 함수 시그니처 변경 없음. SOT read-only. 비파괴적.
 - **관련 ADR**: ADR-073 (QO-1~5), ADR-071 (Hallucination Containment)
 
+### ADR-075: Academic Search Hallucination Containment — Orchestrator Pre-fetch Pattern
+
+- **날짜**: 2026-03-11
+- **상태**: `Accepted`
+- **맥락**: Phase 1 문헌 검토에서 4개 에이전트(`literature-searcher`, `seminal-works-analyst`, `trend-analyst`, `empirical-evidence-analyst`)가 학술 DB 검색을 수행하는데, (1) 검색 쿼리를 LLM이 구성하면 할루시네이션 가능, (2) 에이전트는 Bash 없이 API 호출 불가, (3) Orchestrator가 JSON 파싱으로 SOT 등록 명령을 조립하면 필드 추출 할루시네이션 가능, (4) 캐시 파일 삭제 후 SOT 불일치 가능.
+- **결정**: Orchestrator Pre-fetch Pattern으로 6개 할루시네이션 벡터 봉쇄:
+  - **V-1** (쿼리 구성): `run_academic_search.py --auto-from-sot` — SOT `research_question`에서 P1 결정론적 쿼리 추출. LLM 쿼리 구성 0%.
+  - **V-2** (프리페치 실행): `query_step.py`가 `pre_execution_command` 필드로 완전한 P1 bash 명령 반환. Orchestrator는 `{project_dir}`만 치환하여 실행.
+  - **V-3** (SOT 등록): `run_academic_search.py`가 `sot_registration_command` 필드로 완전한 P1 bash 명령 출력. Orchestrator JSON 파싱 0%.
+  - **V-4** (캐시 참조 검증): `verify_step_output.py` VO-8 — 검색 프리페치 에이전트 산출물에서 search-cache 참조 패턴 사후 검증 (WARNING only).
+  - **H-1** (캐시 무결성): `is_search_cache_registered()` — SOT 엔트리 + 디스크 `os.path.isfile()` 이중 검증.
+  - **H-2** (JSON 파싱): `sot_registration_command`로 LLM 필드 추출 제거. `run_academic_search.py`가 완전 조립된 명령 출력.
+- **변경 파일**:
+  - `run_academic_search.py`: `_extract_query_from_sot()`, `--auto-from-sot`, `sot_registration_command` 출력, `_validate_cache()` V-1~V-4
+  - `query_step.py`: `_get_pre_execution_command()`, `SEARCH_PREFETCH_AGENTS`, `pre_execution_command` 반환
+  - `checklist_manager.py`: `register_search_cache()`, `is_search_cache_registered()`, `--register-search-cache`/`--is-search-cached` CLI, TS8 dict 허용
+  - `verify_step_output.py`: VO-8 `_CACHE_REF_PATTERNS`, `SEARCH_PREFETCH_AGENTS` 참조 검증
+  - `thesis-orchestrator.md`: E1 pre-fetch protocol 4-step 결정론적 흐름으로 재작성
+- **근거**: 절대 기준 1(품질). 학술 검색은 논문 품질의 근본 — 검색 쿼리/결과의 할루시네이션은 전체 문헌 검토를 무효화한다. P1 결정론적 파이프라인으로 LLM 개입 지점을 0으로 줄여 재현 가능한 검색 보장.
+- **대안 기각**: (1) 에이전트에 Bash 권한 부여(보안 위험, Agent 격리 원칙 위반), (2) WebSearch만 사용(학술 DB 특화 검색 불가), (3) 검색 캐시 없이 매번 실시간 검색(비결정론적, 재현 불가).
+- **파급 효과**: 기존 에이전트 호출 흐름 변경 없음. `pre_execution_command`는 optional (None이면 프리페치 건너뜀). TS8 확장은 `-search` suffix 한정. 비파괴적.
+- **관련 ADR**: ADR-071 (Hallucination Containment), ADR-064 (query_step.py), ADR-073 (QO-1~5)
+
 ---
 
 ## 문서 관리

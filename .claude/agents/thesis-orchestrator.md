@@ -112,6 +112,29 @@ This returns a JSON object with ALL execution parameters:
 
 **DO NOT interpret prose rules for agent/tier/critic/pCCS selection — use the JSON output directly.**
 
+**Academic search pre-fetch** (when `pre_execution_command` is non-null in query_step.py output):
+
+1. **Check if already cached** (prevent redundant API calls after context compression):
+```bash
+python3 .claude/hooks/scripts/checklist_manager.py --is-search-cached --project-dir {dir} --step {N}
+```
+If `"cached": true` → skip pre-fetch (cache already registered in SOT).
+
+2. **Execute pre-fetch command** — use `pre_execution_command` from query_step.py output **verbatim** (P1 deterministic, do NOT modify or construct manually):
+```bash
+{pre_execution_command}   # with {project_dir} resolved to actual path
+```
+The command uses `--auto-from-sot` to derive the search query from `session.json`'s `research_question` (P1 deterministic — no LLM-constructed query strings).
+
+3. **Register cache in SOT** — use `sot_registration_command` from the pre-fetch script's JSON output **verbatim** (P1 deterministic, do NOT construct manually):
+```bash
+{sot_registration_command}   # with {project_dir} resolved to actual path
+```
+
+4. **Validate**: Check `validation.valid` in the pre-fetch script output — if `false`, warn but continue (agents can fall back to WebSearch).
+
+**DO NOT construct search queries or registration commands manually.** Both `pre_execution_command` and `sot_registration_command` are P1 deterministic — run them verbatim with only `{project_dir}` resolved.
+
 **HITL blocking check** (for steps where `hitl_required` is true):
 ```bash
 python3 .claude/hooks/scripts/checklist_manager.py --is-hitl-blocking --project-dir {dir} --hitl-name {hitl-name}

@@ -93,14 +93,22 @@ claims:
 3. **SOFTEN**: When synthesizing across heterogeneous studies, use "the preponderance of evidence suggests" rather than definitive claims.
 4. **VERIFY**: For the 5 most-cited effect sizes, cross-check against original paper abstracts via WebFetch.
 
+## Academic Search Cache
+
+The Orchestrator pre-fetches academic database results before invoking you. Check for cached results at:
+- `search-cache/step-{N}-results.json` — unified search results from 10+ academic databases with abstracts, DOIs, and open access URLs
+
+Read this file via the Read tool. Use abstracts from cached papers to extract reported findings and methodological details. Open access URLs can be fetched via WebFetch for full-text access to key studies.
+
 ## Execution Protocol
 
 1. Read prior wave outputs to understand corpus, methods, and theoretical framework.
-2. Extract findings study-by-study into structured tables.
-3. Group by construct/relationship and compare across studies.
-4. Analyze consistency patterns and moderating factors.
-5. Produce narrative synthesis and evidence strength assessment.
-6. Self-check: verify that no statistical value lacks a source citation.
+2. **Read cached search results** from `search-cache/step-{N}-results.json` if available — use abstracts for findings extraction.
+3. Extract findings study-by-study into structured tables.
+4. Group by construct/relationship and compare across studies.
+5. Analyze consistency patterns and moderating factors.
+6. Produce narrative synthesis and evidence strength assessment.
+7. Self-check: verify that no statistical value lacks a source citation.
 
 ## Quality Constraints
 
